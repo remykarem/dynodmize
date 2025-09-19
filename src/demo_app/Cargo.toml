@@ -1,0 +1,12 @@
+[package]
+name = "demo_app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+entity_core = { path = "../entity_core" }
+entity_macros = { path = "../entity_macros" }
+aws-sdk-dynamodb = "1.93.0"
+aws-config = "1.8.6"
+tokio = { version = "1.47.1", features = ["macros", "full", "rt", "rt-multi-thread"] }
+serde = { version = "1.0.225", features = ["derive"] }
