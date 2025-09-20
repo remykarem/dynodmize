@@ -17,7 +17,7 @@ struct UserFollower {
 	user_id: u32,
 	
 	#[sk(prefix = "u")]
-	follower_id: usize,
+	follower_id: u32,
 }
 ```
 
