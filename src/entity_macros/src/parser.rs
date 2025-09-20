@@ -351,6 +351,113 @@ fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
         quote! { vec![ #( #items ),* ] }
     };
 
+    let name = &input.ident;
+
+    //
+    // ─── PK ──────────────────────────────────────────────
+    //
+    let pk_expr = if let Some(static_value) = &schema.partition_key.static_value {
+        let vp = schema.partition_key.value_prefix.clone();
+        let vs = schema.partition_key.value_suffix.clone();
+        let val = static_value.clone();
+        let vp_expr = match &schema.partition_key.value_prefix {
+            Some(p) => Some(quote! { parts.push(#p.to_string()); }),
+            None => None,
+        };
+        let vs_expr = match &schema.partition_key.value_suffix {
+            Some(s) => Some(quote! { parts.push(#s.to_string()); }),
+            None => None,
+        };
+        quote! {
+            {
+                let mut parts = vec![];
+                #vp_expr
+                parts.push(#val.to_string());
+                #vs_expr
+                parts.join("#")
+            }
+        }
+    } else {
+        let segs = schema.partition_key.segments.iter().map(|seg| {
+            let field = syn::Ident::new(&seg.field_name, proc_macro2::Span::call_site());
+            if let Some(pfx) = &seg.prefix {
+                quote! { format!("{}#{}", #pfx, self.#field) }
+            } else {
+                quote! { self.#field.to_string() }
+            }
+        });
+        quote! { vec![ #( #segs ),* ].join("#") }
+    };
+
+    //
+    // ─── SK ──────────────────────────────────────────────
+    //
+    let sk_expr = if let Some(sk) = &schema.sort_key {
+        if let Some(static_value) = &sk.static_value {
+            let vp = sk.value_prefix.clone();
+            let vs = sk.value_suffix.clone();
+            let val = static_value.clone();
+            let vp_expr = match &schema.partition_key.value_prefix {
+                Some(p) => Some(quote! { parts.push(#p.to_string()); }),
+                None => None,
+            };
+            let vs_expr = match &schema.partition_key.value_suffix {
+                Some(s) => Some(quote! { parts.push(#s.to_string()); }),
+                None => None,
+            };
+            quote! {
+                {
+                    let mut parts = vec![];
+                    #vp_expr
+                    parts.push(#val.to_string());
+                    #vs_expr
+                    parts.join("#")
+                }
+            }
+        } else {
+            let segs = sk.segments.iter().map(|seg| {
+                let field = syn::Ident::new(&seg.field_name, proc_macro2::Span::call_site());
+                if let Some(pfx) = &seg.prefix {
+                    quote! { format!("{}#{}", #pfx, self.#field) }
+                } else {
+                    quote! { self.#field.to_string() }
+                }
+            });
+            quote! { Some(vec![ #( #segs ),* ].join("#")) }
+        }
+    } else {
+        quote! { None }
+    };
+
+    //
+    // ─── NKS ─────────────────────────────────────────────
+    //
+    let nk_inserts = schema.non_keys.iter().map(|nk| {
+        let name = &nk.attribute_name;
+        match &nk.kind {
+            NonKeyKind::Static(v) => {
+                let val = v.clone();
+                quote! {
+                    map.insert(#name.to_string(), serde_json::Value::String(#val.to_string()));
+                }
+            }
+            NonKeyKind::Composite { segments, .. } => {
+                let segs = segments.iter().map(|seg| {
+                    let field = syn::Ident::new(&seg.field_name, proc_macro2::Span::call_site());
+                    if let Some(pfx) = &seg.prefix {
+                        quote! { format!("{}#{}", #pfx, self.#field) }
+                    } else {
+                        quote! { self.#field.to_string() }
+                    }
+                });
+                quote! {
+                    map.insert(#name.to_string(),
+                        serde_json::Value::String(vec![ #( #segs ),* ].join("#")));
+                }
+            }
+        }
+    });
+
     // --- final impl ---
     quote! {
         impl entity_core::Entity2 for #name {
@@ -370,6 +477,24 @@ fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
                     sort_key: sk,
                     non_keys: #nk_items,
                 }
+            }
+
+            fn to_item(&self) -> serde_json::Value {
+                let mut map = serde_json::Map::new();
+
+                // PK
+                let pk_val = #pk_expr;
+                map.insert("pk".to_string(), serde_json::Value::String(pk_val));
+
+                // SK
+                if let Some(sk_val) = #sk_expr {
+                    map.insert("sk".to_string(), serde_json::Value::String(sk_val));
+                }
+
+                // NKs
+                #( #nk_inserts )*
+
+                serde_json::Value::Object(map)
             }
         }
     }

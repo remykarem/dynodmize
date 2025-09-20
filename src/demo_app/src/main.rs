@@ -1,12 +1,12 @@
 mod entity2tings;
 
-use crate::entity2tings::{Entity2, Entity2Repo, Entity2Setters, User};
+use crate::entity2tings::{Entity2Repo, MyEntity2, MyEntity2Setters, User};
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_dynamodb::config::{BehaviorVersion, Region};
 use aws_sdk_dynamodb::Client;
 use entity_core::*;
 use serde::Serialize;
-
+use entity_core::Entity2;
 // #[tokio::main]
 // async fn main() {
 //     main2().await
@@ -14,6 +14,16 @@ use serde::Serialize;
 
 fn main() {
     println!("{:?}", User::get_schema());
+    let user = User { 
+        last_name: "D".to_string(),
+
+        first_name: "dd".to_string(),
+        attribute2: "ss".to_string(),
+        attribute3: "dgg".to_string(),
+        attribute4: "fhjj".to_string(),
+        attribute5: "uu".to_string(),
+    };
+    println!("{}", user.to_item());
 }
 
 async fn main2() {
@@ -32,7 +42,7 @@ async fn main2() {
     let repo = Entity2Repo;
 
     // ── CREATE ─────────────────────────────────────
-    let entity = Entity2 {
+    let entity = MyEntity2 {
         pk: "pk_123".into(),
         attribute2_hello: true,
         attribute3: "sk_partB".into(),

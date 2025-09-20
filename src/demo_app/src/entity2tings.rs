@@ -4,28 +4,29 @@ use serde::Serialize;
 
 #[derive(Entity)]
 #[pk(name = "last_name")]
+#[sk(name = "sk")]
 pub struct User {
     #[pk(order = 0)]
-    last_name: String,
+    pub last_name: String,
 
     #[pk(order = 1)]
-    first_name: String,
+    pub first_name: String,
 
     #[sk(order = 0)]
-    attribute2: String,
+    pub attribute2: String,
 
     #[sk(prefix = "ATTRIBUTE3", order = 1)]
-    attribute3: String,
+    pub attribute3: String,
 
     #[sk(prefix = "ATTRIBUTE4", order = 2)]
-    attribute4: String,
+    pub attribute4: String,
 
-    attribute5: String,
+    pub attribute5: String,
 }
 
 // ── ENTITY ────────────────────────────────────────
 #[derive(Debug, Default, EntityModel, Serialize)]
-pub struct Entity2 {
+pub struct MyEntity2 {
     #[partition_key]
     pub pk: String,
 
@@ -39,5 +40,5 @@ pub struct Entity2 {
 }
 
 // ── REPO ──────────────────────────────────────────
-#[based_on(Entity2)]
+#[based_on(MyEntity2)]
 pub struct Entity2Repo;

@@ -612,6 +612,7 @@ dependencies = [
  "entity_core",
  "entity_macros",
  "serde",
+ "serde_json",
  "tokio",
 ]
 
