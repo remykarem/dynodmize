@@ -438,14 +438,8 @@ fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
             let vp = sk.value_prefix.clone();
             let vs = sk.value_suffix.clone();
             let val = static_value.clone();
-            let vp_expr = match &schema.partition_key.value_prefix {
-                Some(p) => Some(quote! { parts.push(#p.to_string()); }),
-                None => None,
-            };
-            let vs_expr = match &schema.partition_key.value_suffix {
-                Some(s) => Some(quote! { parts.push(#s.to_string()); }),
-                None => None,
-            };
+            let vp_expr = schema.partition_key.value_prefix.as_ref().map(|p| quote! { parts.push(#p.to_string()); });
+            let vs_expr = schema.partition_key.value_suffix.as_ref().map(|s| quote! { parts.push(#s.to_string()); });
             quote! {
                 {
                     let mut parts = vec![];

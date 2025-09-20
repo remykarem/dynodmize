@@ -3,6 +3,26 @@ use entity_macros::{Entity, EntityModel, based_on};
 use serde::Serialize;
 
 #[derive(Entity)]
+#[pk(name = "pk")]
+#[sk(
+    name = "sk",
+    value_prefix = "comm",
+)]
+pub struct ComplaintComments {
+
+    #[pk]
+    pub complaint_id: u32,
+
+    #[sk(order = 1)]
+    pub comment_id: u32,
+
+    #[sk(order = 0)]
+    pub comment_date: String,
+
+}
+
+
+#[derive(Entity)]
 #[pk(name = "last_name")]
 #[sk(name = "dd")]
 #[nk(name = "type", value = "dynamo")]

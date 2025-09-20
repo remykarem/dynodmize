@@ -1,6 +1,6 @@
 mod entity2tings;
 
-use crate::entity2tings::{Entity2Repo, MyEntity2, MyEntity2Setters, User};
+use crate::entity2tings::{ComplaintComments, Entity2Repo, MyEntity2, MyEntity2Setters, User};
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_dynamodb::config::{BehaviorVersion, Region};
 use aws_sdk_dynamodb::Client;
@@ -13,17 +13,23 @@ use entity_core::Entity2;
 // }
 
 fn main() {
-    println!("{:?}", User::get_schema());
-    let user = User { 
-        last_name: "D".to_string(),
-
-        first_name: "dd".to_string(),
-        attribute2: "ss".to_string(),
-        attribute3: "dgg".to_string(),
-        attribute4: "fhjj".to_string(),
-        attribute5: "uu".to_string(),
+    // println!("{:?}", User::get_schema());
+    // let user = User {
+    //     last_name: "D".to_string(),
+    //
+    //     first_name: "dd".to_string(),
+    //     attribute2: "ss".to_string(),
+    //     attribute3: "dgg".to_string(),
+    //     attribute4: "fhjj".to_string(),
+    //     attribute5: "uu".to_string(),
+    // };
+    // println!("{}", user.to_item());
+    let ent = ComplaintComments {
+        complaint_id: 123,
+        comment_date: "somedate".to_string(),
+        comment_id: 456,
     };
-    println!("{}", user.to_item());
+    println!("{}", ent.to_item());
 }
 
 async fn main2() {
