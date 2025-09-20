@@ -2,6 +2,8 @@
 
 Yet another attempt of ODM for DynamoDB.
 
+⚠️This is a pet project!
+
 Define:
 
 ```rust
