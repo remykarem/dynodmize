@@ -2,7 +2,7 @@
 
 Yet another attempt of ODM for DynamoDB.
 
-Defining this
+Define:
 
 ```rust
 #[derive(Entity)]
@@ -18,6 +18,15 @@ struct UserFollower {
 	
 	#[sk(prefix = "u")]
 	follower_id: u32,
+}
+```
+
+Then
+
+```rust
+fn main() {
+    let user = UserFollower { user_id: 12345, follower_id: 23456 };
+    println!("{}", user.to_item());
 }
 ```
 
