@@ -1,198 +1,553 @@
+use std::collections::HashMap;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::Parser;
 use syn::{Data, DeriveInput, Error, Lit, Meta};
+use entity_core::{CompositeKey, KeySegment, NonKey, NonKeyKind, NonKeySegment, Schema};
+
+pub const DELIMITER: char = '#';
 
 pub fn expand_entity(input: &DeriveInput) -> TokenStream {
-    let name = &input.ident;
+    match parse_entity(input) {
+        Ok(schema) => generate_impl(input, schema),
+        Err(err) => err.to_compile_error(),
+    }
+}
 
-    let mut pk_segments = vec![];
-    let mut sk_segments = vec![];
-    let mut non_keys = vec![];
+fn parse_entity(input: &DeriveInput) -> Result<Schema, Error> {
+    let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
+    let field_infos = parse_fields(input)?;
+    let schema = build_ir(pk_def, sk_def, nk_defs, field_infos)?;
+    validate_schema(&schema)?;
+    Ok(schema)
+}
 
-    let mut pk_target_val: Option<String> = None;
-    let mut sk_target_val: Option<String> = None;
+//
+// ─── ENTITY LEVEL ATTRS ─────────────────────────────────────────────────────────
+//
 
-    let Data::Struct(ds) = &input.data else {
-        return Error::new_spanned(input, "Entity can only be derived for structs")
-            .to_compile_error();
-    };
+struct PkDef {
+    name: String,
+    value_prefix: Option<String>,
+    value_suffix: Option<String>,
+    static_value: Option<String>,
+}
 
-    for field in ds.fields.iter() {
-        let ident = field.ident.as_ref().unwrap();
+struct SkDef {
+    name: String,
+    value_prefix: Option<String>,
+    value_suffix: Option<String>,
+    static_value: Option<String>,
+}
 
-        // defaults
-        let mut seg_name: Option<String> = None;
-        let mut seg_order: Option<usize> = None;
-        let mut serialize_as_non_key = true;
+struct NkDef {
+    name: String,
+    value_prefix: Option<String>,
+    value_suffix: Option<String>,
+    static_value: Option<String>,
+}
 
-        for attr in &field.attrs {
-            if attr.path().is_ident("partition") || attr.path().is_ident("sort") {
-                if let Meta::List(list) = attr.meta.clone() {
-                    let parsed =
-                        syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
-                            .parse2(list.tokens.clone())
-                            .unwrap();
+fn parse_entity_attrs(
+    input: &DeriveInput,
+) -> Result<(PkDef, Option<SkDef>, Vec<NkDef>), syn::Error> {
+    let mut pk: Option<PkDef> = None;
+    let mut sk: Option<SkDef> = None;
+    let mut nks: Vec<NkDef> = vec![];
 
-                    for nested in parsed {
-                        if let Meta::NameValue(nv) = nested {
-                            let key = nv.path.get_ident().unwrap().to_string();
-                            if let syn::Expr::Lit(expr_lit) = &nv.value {
-                                match (&key[..], &expr_lit.lit) {
-                                    ("pk_target", Lit::Str(s)) => {
-                                        match &pk_target_val {
-                                            None => pk_target_val = Some(s.value()),
-                                            Some(existing) if existing != &s.value() => {
-                                                panic!("Multiple differing pk_target values found");
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    ("sk_target", Lit::Str(s)) => {
-                                        match &sk_target_val {
-                                            None => sk_target_val = Some(s.value()),
-                                            Some(existing) if existing != &s.value() => {
-                                                panic!("Multiple differing sk_target values found");
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    ("pk_attribute_segment_name", Lit::Str(s))
-                                    | ("sk_attribute_segment_name", Lit::Str(s)) => {
-                                        seg_name = Some(s.value());
-                                    }
-                                    ("pk_attribute_segment_order", Lit::Int(i))
-                                    | ("sk_attribute_segment_order", Lit::Int(i)) => {
-                                        seg_order = Some(i.base10_parse().unwrap());
-                                    }
-                                    ("serialize_as_non_key", Lit::Bool(b)) => {
-                                        serialize_as_non_key = b.value();
-                                    }
-                                    _ => {
-                                        panic!("Unknown attribute: {}", key);
-                                    }
+    for attr in &input.attrs {
+        if attr.path().is_ident("pk") || attr.path().is_ident("sk") || attr.path().is_ident("nk") {
+            let meta = attr.meta.clone();
+
+            if let Meta::List(list) = meta {
+                let mut name: Option<String> = None;
+                let mut value_prefix = None;
+                let mut value_suffix = None;
+                let mut static_value = None;
+
+                let parsed = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
+                    .parse2(list.tokens.clone())?;
+
+                for nested in parsed {
+                    if let Meta::NameValue(nv) = nested {
+                        let key = nv.path.get_ident().unwrap().to_string();
+                        if let syn::Expr::Lit(expr_lit) = &nv.value {
+                            match (&key[..], &expr_lit.lit) {
+                                ("name", Lit::Str(s)) => name = Some(s.value()),
+                                ("value_prefix", Lit::Str(s)) => value_prefix = Some(s.value()),
+                                ("value_suffix", Lit::Str(s)) => value_suffix = Some(s.value()),
+                                ("value", Lit::Str(s)) => static_value = Some(s.value()),
+                                _ => {
+                                    return Err(Error::new_spanned(
+                                        nv,
+                                        "Unknown entity-level attribute",
+                                    ));
                                 }
                             }
                         }
                     }
                 }
 
-                if attr.path().is_ident("partition") {
-                    pk_segments.push((
-                        seg_order.unwrap_or(usize::MAX),
-                        seg_name.clone(),
-                        ident.clone(),
-                        serialize_as_non_key,
-                    ));
+                if attr.path().is_ident("pk") {
+                    if pk.is_some() {
+                        return Err(Error::new_spanned(attr, "Multiple #[pk(...)] not allowed"));
+                    }
+                    let name = name
+                        .clone()
+                        .ok_or_else(|| Error::new_spanned(attr, "pk must have a name"))?;
+                    pk = Some(PkDef {
+                        name,
+                        value_prefix: value_prefix.clone(),
+                        value_suffix: value_suffix.clone(),
+                        static_value: static_value.clone(),
+                    });
                 }
-                if attr.path().is_ident("sort") {
-                    sk_segments.push((
-                        seg_order.unwrap_or(usize::MAX),
-                        seg_name.clone(),
-                        ident.clone(),
-                        serialize_as_non_key,
-                    ));
+
+                if attr.path().is_ident("sk") {
+                    if sk.is_some() {
+                        return Err(Error::new_spanned(&attr, "Multiple #[sk(...)] not allowed"));
+                    }
+                    let name = name
+                        .clone()
+                        .ok_or_else(|| Error::new_spanned(attr, "sk must have a name"))?;
+                    sk = Some(SkDef {
+                        name,
+                        value_prefix: value_prefix.clone(),
+                        value_suffix: value_suffix.clone(),
+                        static_value: static_value.clone(),
+                    });
+                }
+
+                if attr.path().is_ident("nk") {
+                    let name =
+                        name.ok_or_else(|| Error::new_spanned(attr, "nk must have a name"))?;
+                    nks.push(NkDef {
+                        name,
+                        value_prefix,
+                        value_suffix,
+                        static_value,
+                    });
+                }
+            }
+        }
+    }
+
+    let pk = pk.ok_or_else(|| Error::new_spanned(input, "Missing #[pk(...)] at entity level"))?;
+    Ok((pk, sk, nks))
+}
+
+//
+// ─── FIELD LEVEL ATTRS ──────────────────────────────────────────────────────────
+//
+
+struct FieldInfo {
+    field_name: String,
+    pk: Option<(Option<String>, usize)>, // (prefix, order)
+    sk: Option<(Option<String>, usize)>,
+    nks: Vec<(String, Option<String>, usize)>, // (nk name, prefix, order)
+}
+
+fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
+    let mut out = vec![];
+
+    let Data::Struct(ds) = &input.data else {
+        return Err(Error::new_spanned(
+            input,
+            "Entity can only be derived for structs",
+        ));
+    };
+
+    for field in &ds.fields {
+        let ident = field.ident.as_ref().unwrap();
+        let mut pk = None;
+        let mut sk = None;
+        let mut nks = vec![];
+
+        for attr in &field.attrs {
+            if attr.path().is_ident("pk")
+                || attr.path().is_ident("sk")
+                || attr.path().is_ident("nk")
+            {
+                let meta = attr.meta.clone();
+                if let Meta::List(list) = meta {
+                    let mut prefix = None;
+                    let mut order: Option<usize> = None;
+                    let mut name: Option<String> = None;
+
+                    let parsed =
+                        syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
+                            .parse2(list.tokens.clone())?;
+
+                    for nested in parsed {
+                        if let Meta::NameValue(nv) = nested {
+                            let key = nv.path.get_ident().unwrap().to_string();
+                            if let syn::Expr::Lit(expr_lit) = &nv.value {
+                                match (&key[..], &expr_lit.lit) {
+                                    ("prefix", Lit::Str(s)) => prefix = Some(s.value()),
+                                    ("order", Lit::Int(i)) => order = Some(i.base10_parse()?),
+                                    ("name", Lit::Str(s)) => name = Some(s.value()),
+                                    _ => {
+                                        return Err(Error::new_spanned(
+                                            nv,
+                                            "Unknown field-level attribute",
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let order = order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
+
+                    if attr.path().is_ident("pk") {
+                        pk = Some((prefix.clone(), order));
+                    }
+
+                    if attr.path().is_ident("sk") {
+                        sk = Some((prefix.clone(), order));
+                    }
+
+                    if attr.path().is_ident("nk") {
+                        let name = name
+                            .ok_or_else(|| Error::new_spanned(attr, "nk field must have name"))?;
+                        nks.push((name, prefix, order));
+                    }
                 }
             }
         }
 
-        // unannotated → always non-key
-        if field
-            .attrs
-            .iter()
-            .all(|a| !a.path().is_ident("partition") && !a.path().is_ident("sort"))
-        {
-            non_keys.push(ident.clone());
+        out.push(FieldInfo {
+            field_name: ident.to_string(),
+            pk,
+            sk,
+            nks,
+        });
+    }
+
+    Ok(out)
+}
+
+//
+// ─── IR BUILD + VALIDATION ──────────────────────────────────────────────────────
+//
+
+//
+// ─── CODEGEN ────────────────────────────────────────────────────────────────────
+//
+
+fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
+
+    let name = &input.ident;
+
+    // --- small helpers to turn IR pieces into tokens ---
+    let opt_str = |v: &Option<String>| -> TokenStream {
+        match v {
+            Some(s) => quote! { Some(#s.to_string()) },
+            None => quote! { None },
         }
-    }
+    };
 
-    // enforce pk_target
-    let pk_name = pk_target_val.expect("Missing required pk_target on partition field(s)");
+    let seg_tokens = |segs: &Vec<KeySegment>| -> TokenStream {
+        let parts = segs.iter().map(|s| {
+            let field = &s.field_name;
+            match &s.prefix {
+                Some(p) => quote! {
+                    entity_core::KeySegment {
+                        field_name: #field.to_string(),
+                        prefix: Some(#p.to_string()),
+                    }
+                },
+                None => quote! {
+                    entity_core::KeySegment {
+                        field_name: #field.to_string(),
+                        prefix: None,
+                    }
+                },
+            }
+        });
+        quote! { vec![ #( #parts ),* ] }
+    };
 
-    // enforce sk_target uniqueness
-    if sk_segments.is_empty() {
-        sk_target_val = None;
-    }
-    // if sk_segments not empty but sk_target_val is None → panic
-    if !sk_segments.is_empty() && sk_target_val.is_none() {
-        panic!("Found sort key fields but no sk_target provided");
-    }
+    let nk_kind_tokens = |k: &NonKeyKind| -> TokenStream {
+        match k {
+            NonKeyKind::Static(v) => {
+                quote! { entity_core::NonKeyKind::Static(#v.to_string()) }
+            }
+            NonKeyKind::Composite { value_prefix, value_suffix, segments } => {
+                let vp = opt_str(value_prefix);
+                let vs = opt_str(value_suffix);
 
-    // sort pk/sk segments by order
-    pk_segments.sort_by_key(|(order, _, _, _)| *order);
-    sk_segments.sort_by_key(|(order, _, _, _)| *order);
+                // NonKey segments are NonKeySegment (not KeySegment)
+                let segs = {
+                    let parts = segments.iter().map(|s: &NonKeySegment| {
+                        let field = &s.field_name;
+                        match &s.prefix {
+                            Some(p) => quote! {
+                                entity_core::NonKeySegment {
+                                    field_name: #field.to_string(),
+                                    prefix: Some(#p.to_string()),
+                                }
+                            },
+                            None => quote! {
+                                entity_core::NonKeySegment {
+                                    field_name: #field.to_string(),
+                                    prefix: None,
+                                }
+                            },
+                        }
+                    });
+                    quote! { vec![ #( #parts ),* ] }
+                };
 
-    // Schema PK attributes
-    let pk_attrs = pk_segments.iter().map(|(_, seg_name, ident, serialize)| {
-        let seg_expr = if let Some(seg) = seg_name {
-            quote! { Some(#seg.to_string()) }
-        } else {
-            quote! { None }
-        };
-        let attr_name = ident.to_string();
-        quote! {
-            entity_core::CompositeKeyAttribute {
-                attribute_segment_name_in_key: #seg_expr,
-                attribute_name_in_data: #attr_name.into(),
-                serialize_value_in_data: #serialize,
+                quote! {
+                    entity_core::NonKeyKind::Composite {
+                        value_prefix: #vp,
+                        value_suffix: #vs,
+                        segments: #segs,
+                    }
+                }
             }
         }
-    });
+    };
 
-    // Schema SK attributes
-    let sk_attrs = sk_segments.iter().map(|(_, seg_name, ident, serialize)| {
-        let seg_expr = if let Some(seg) = seg_name {
-            quote! { Some(#seg.to_string()) }
-        } else {
-            quote! { None }
-        };
-        let attr_name = ident.to_string();
-        quote! {
-            entity_core::CompositeKeyAttribute {
-                attribute_segment_name_in_key: #seg_expr,
-                attribute_name_in_data: #attr_name.into(),
-                serialize_value_in_data: #serialize,
-            }
-        }
-    });
+    // --- PK tokens ---
+    let pk_attr_name = schema.partition_key.attribute_name;
+    let pk_vp = opt_str(&schema.partition_key.value_prefix);
+    let pk_vs = opt_str(&schema.partition_key.value_suffix);
+    let pk_static = opt_str(&schema.partition_key.static_value);
+    let pk_segments = seg_tokens(&schema.partition_key.segments);
 
-    // Data (non-key attributes)
-    let data_attrs = non_keys.iter().map(|ident| {
-        let attr_name = ident.to_string();
-        quote! {
-            entity_core::Attribute { name: #attr_name.into() }
-        }
-    });
-
-    // sk schema
-    let sk_schema = if let Some(sk_name) = sk_target_val {
+    // --- SK tokens (optional) ---
+    let sk_tokens = if let Some(sk) = &schema.sort_key {
+        let sk_name = sk.attribute_name.clone();
+        let sk_vp = opt_str(&sk.value_prefix);
+        let sk_vs = opt_str(&sk.value_suffix);
+        let sk_static = opt_str(&sk.static_value);
+        let sk_segments = seg_tokens(&sk.segments);
         quote! {
             Some(entity_core::CompositeKey {
-                attribute_name: #sk_name.into(),
-                attributes: vec![ #( #sk_attrs ),* ],
+                attribute_name: #sk_name.to_string(),
+                value_prefix: #sk_vp,
+                value_suffix: #sk_vs,
+                static_value: #sk_static,
+                segments: #sk_segments,
             })
         }
     } else {
         quote! { None }
     };
 
+    // --- NK tokens ---
+    let nk_items = {
+        let items = schema.non_keys.iter().map(|nk: &NonKey| {
+            let name = nk.attribute_name.clone();
+            let kind = nk_kind_tokens(&nk.kind);
+            quote! {
+                entity_core::NonKey {
+                    attribute_name: #name.to_string(),
+                    kind: #kind,
+                }
+            }
+        });
+        quote! { vec![ #( #items ),* ] }
+    };
+
+    // --- final impl ---
     quote! {
-        impl entity_core::Entity1 for #name {
+        impl entity_core::Entity2 for #name {
             fn get_schema() -> entity_core::Schema {
                 let pk = entity_core::CompositeKey {
-                    attribute_name: #pk_name.into(),
-                    attributes: vec![ #( #pk_attrs ),* ],
+                    attribute_name: #pk_attr_name.to_string(),
+                    value_prefix: #pk_vp,
+                    value_suffix: #pk_vs,
+                    static_value: #pk_static,
+                    segments: #pk_segments,
                 };
 
-                let sk = #sk_schema;
+                let sk = #sk_tokens;
 
                 entity_core::Schema {
                     partition_key: pk,
                     sort_key: sk,
-                    data: std::collections::HashSet::from([ #( #data_attrs ),* ]),
-                    delimiter: '#',
+                    non_keys: #nk_items,
                 }
             }
         }
     }
+}
+
+fn build_ir(
+    pk_def: PkDef,
+    sk_def: Option<SkDef>,
+    nk_defs: Vec<NkDef>,
+    field_infos: Vec<FieldInfo>,
+) -> Result<Schema, syn::Error> {
+    //
+    // ─── BUILD PK ────────────────────────────────────────────────────────────────
+    //
+    let mut pk_segments: Vec<(usize, KeySegment)> = vec![];
+    for f in &field_infos {
+        if let Some((prefix, order)) = &f.pk {
+            pk_segments.push((
+                *order,
+                KeySegment {
+                    field_name: f.field_name.clone(),
+                    prefix: prefix.clone(),
+                },
+            ));
+        }
+    }
+    pk_segments.sort_by_key(|(ord, _)| *ord);
+    let pk_segments: Vec<KeySegment> = pk_segments.into_iter().map(|(_, seg)| seg).collect();
+
+    let pk = CompositeKey {
+        attribute_name: pk_def.name,
+        value_prefix: pk_def.value_prefix,
+        value_suffix: pk_def.value_suffix,
+        static_value: pk_def.static_value,
+        segments: pk_segments,
+    };
+
+    //
+    // ─── BUILD SK ────────────────────────────────────────────────────────────────
+    //
+    let sk = if let Some(sk_def) = sk_def {
+        let mut sk_segments: Vec<(usize, KeySegment)> = vec![];
+        for f in &field_infos {
+            if let Some((prefix, order)) = &f.sk {
+                sk_segments.push((
+                    *order,
+                    KeySegment {
+                        field_name: f.field_name.clone(),
+                        prefix: prefix.clone(),
+                    },
+                ));
+            }
+        }
+        sk_segments.sort_by_key(|(ord, _)| *ord);
+        let sk_segments: Vec<KeySegment> = sk_segments.into_iter().map(|(_, seg)| seg).collect();
+
+        Some(CompositeKey {
+            attribute_name: sk_def.name,
+            value_prefix: sk_def.value_prefix,
+            value_suffix: sk_def.value_suffix,
+            static_value: sk_def.static_value,
+            segments: sk_segments,
+        })
+    } else {
+        None
+    };
+
+    //
+    // ─── BUILD NKS ───────────────────────────────────────────────────────────────
+    //
+    let mut nk_map: HashMap<String, NonKey> = HashMap::new();
+
+    // start with struct-level NKs
+    for nk_def in nk_defs {
+        if let Some(v) = nk_def.static_value {
+            nk_map.insert(
+                nk_def.name.clone(),
+                NonKey {
+                    attribute_name: nk_def.name,
+                    kind: NonKeyKind::Static(v),
+                },
+            );
+        } else {
+            nk_map.insert(
+                nk_def.name.clone(),
+                NonKey {
+                    attribute_name: nk_def.name,
+                    kind: NonKeyKind::Composite {
+                        value_prefix: nk_def.value_prefix,
+                        value_suffix: nk_def.value_suffix,
+                        segments: vec![],
+                    },
+                },
+            );
+        }
+    }
+
+    // add field-level NKs
+    for field_info in &field_infos {
+        for (nk_name, prefix, _order) in &field_info.nks {
+            let entry = nk_map.entry(nk_name.clone()).or_insert(NonKey {
+                attribute_name: nk_name.clone(),
+                kind: NonKeyKind::Composite {
+                    value_prefix: None,
+                    value_suffix: None,
+                    segments: vec![],
+                },
+            });
+
+            match &mut entry.kind {
+                NonKeyKind::Static(_) => {
+                    return Err(Error::new_spanned(
+                        &field_info.field_name,
+                        format!(
+                            "NK {} is defined as static at struct level and cannot have field segments",
+                            nk_name
+                        ),
+                    ));
+                }
+                NonKeyKind::Composite { segments, .. } => {
+                    segments.push(NonKeySegment {
+                        field_name: field_info.field_name.clone(),
+                        prefix: prefix.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    // sort NK segments by order and flatten
+    let mut non_keys: Vec<NonKey> = vec![];
+    for (_, mut nk) in nk_map {
+        if let NonKeyKind::Composite { segments, .. } = &mut nk.kind {
+            let mut ordered: Vec<NonKeySegment> = vec![];
+            for seg in std::mem::take(segments) {
+                ordered.push(seg);
+            }
+        }
+        non_keys.push(nk);
+    }
+
+    Ok(Schema {
+        partition_key: pk,
+        sort_key: sk,
+        non_keys,
+    })
+}
+
+fn validate_schema(schema: &Schema) -> Result<(), syn::Error> {
+    // validate pk
+    if schema.partition_key.static_value.is_none() && schema.partition_key.segments.is_empty() {
+        return Err(Error::new(
+            proc_macro2::Span::call_site(),
+            "PK must have segments or static value",
+        ));
+    }
+
+    // validate sk
+    if let Some(sk) = &schema.sort_key {
+        if sk.static_value.is_none() && sk.segments.is_empty() {
+            return Err(Error::new(
+                proc_macro2::Span::call_site(),
+                "SK must have segments or static value",
+            ));
+        }
+    }
+
+    // validate NKs
+    for nk in &schema.non_keys {
+        if let NonKeyKind::Composite { segments, .. } = &nk.kind {
+            if segments.is_empty() {
+                return Err(Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!("NK {} has no segments", nk.attribute_name),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }

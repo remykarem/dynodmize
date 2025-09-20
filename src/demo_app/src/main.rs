@@ -3,9 +3,7 @@ mod entity2tings;
 use crate::entity2tings::{Entity2, Entity2Repo, Entity2Setters, User};
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_dynamodb::config::{BehaviorVersion, Region};
-use aws_sdk_dynamodb::meta::PKG_VERSION;
-use aws_sdk_dynamodb::types::AttributeValue;
-use aws_sdk_dynamodb::{Client, Error};
+use aws_sdk_dynamodb::Client;
 use entity_core::*;
 use serde::Serialize;
 

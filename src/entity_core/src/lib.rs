@@ -14,6 +14,9 @@ pub trait Entity {
         None
     }
 }
+pub trait Entity2 {
+    fn get_schema() -> Schema;
+}
 
 //
 // ─── CREATE BUILDER ─────────────────────────────────────────────────────────────
@@ -127,28 +130,40 @@ pub trait Entity1 {
     fn get_schema() -> Schema;
 }
 
-#[derive(Debug, Clone)]
 pub struct Schema {
     pub partition_key: CompositeKey,
     pub sort_key: Option<CompositeKey>,
-    pub data: HashSet<Attribute>,
-    pub delimiter: char,
+    pub non_keys: Vec<NonKey>,
 }
 
-#[derive(Debug, Clone)]
 pub struct CompositeKey {
-    pub attribute_name: String,                 // e.g. "pk", "sk"
-    pub attributes: Vec<CompositeKeyAttribute>, // segments
+    pub attribute_name: String,
+    pub value_prefix: Option<String>,
+    pub value_suffix: Option<String>,
+    pub static_value: Option<String>, // mutually exclusive with segments
+    pub segments: Vec<KeySegment>,    // Vec order is the true order
 }
 
-#[derive(Debug, Clone)]
-pub struct CompositeKeyAttribute {
-    pub attribute_segment_name_in_key: Option<String>, // e.g. "ATTRIBUTE3"
-    pub attribute_name_in_data: String,                // e.g. "attribute3"
-    pub serialize_value_in_data: bool,
+pub struct KeySegment {
+    pub field_name: String,
+    pub prefix: Option<String>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct Attribute {
-    pub name: String,
+pub struct NonKey {
+    pub attribute_name: String,
+    pub kind: NonKeyKind,
+}
+
+pub enum NonKeyKind {
+    Static(String),
+    Composite {
+        value_prefix: Option<String>,
+        value_suffix: Option<String>,
+        segments: Vec<NonKeySegment>,
+    },
+}
+
+pub struct NonKeySegment {
+    pub field_name: String,
+    pub prefix: Option<String>,
 }

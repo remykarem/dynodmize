@@ -672,6 +672,7 @@ dependencies = [
 name = "entity_macros"
 version = "0.1.0"
 dependencies = [
+ "entity_core",
  "proc-macro2",
  "quote",
  "syn",

@@ -7,9 +7,9 @@ use syn::{DeriveInput, ItemStruct, parse_macro_input};
 const PARTITION: &str = "partition_key";
 const SORT: &str = "sort";
 
-#[proc_macro_derive(Entity1, attributes(partition, sort))]
+#[proc_macro_derive(Entity, attributes(pk, sk, nk))]
 pub fn derive_entity(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
+    let input = parse_macro_input!(input as syn::DeriveInput);
     parser::expand_entity(&input).into()
 }
 

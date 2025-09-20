@@ -1,52 +1,27 @@
-use serde::Serialize;
-use entity_macros::{based_on, Entity1, EntityModel};
 use aws_sdk_dynamodb::{Client, Error};
+use entity_macros::{Entity, EntityModel, based_on};
+use serde::Serialize;
 
-#[derive(Entity1)]
+#[derive(Entity)]
+#[pk(name = "last_name")]
 pub struct User {
-    #[partition(
-        pk_target = "pk",
-        pk_attribute_segment_name = None,
-        pk_attribute_segment_order = 0,
-        serialize_as_non_key = false,
-    )]
+    #[pk(order = 0)]
     last_name: String,
 
-    #[partition(
-        pk_target = "pk",
-        pk_attribute_segment_name = None,
-        pk_attribute_segment_order = 1,
-        serialize_as_non_key = false,
-    )]
+    #[pk(order = 1)]
     first_name: String,
 
-    #[sort(
-        sk_target = "sk",
-        sk_attribute_segment_name = None,
-        sk_attribute_segment_order = 0,
-        serialize_as_non_key = true,
-    )]
+    #[sk(order = 0)]
     attribute2: String,
 
-    #[sort(
-        sk_target = "sk",
-        sk_attribute_segment_name = "ATTRIBUTE3",
-        sk_attribute_segment_order = 1,
-        serialize_as_non_key = false,
-    )]
+    #[sk(prefix = "ATTRIBUTE3", order = 1)]
     attribute3: String,
 
-    #[sort(
-        sk_target = "sk",
-        sk_attribute_segment_name = "ATTRIBUTE4",
-        sk_attribute_segment_order = 2,
-        serialize_as_non_key = false,
-    )]
+    #[sk(prefix = "ATTRIBUTE4", order = 2)]
     attribute4: String,
 
     attribute5: String,
 }
-
 
 // ── ENTITY ────────────────────────────────────────
 #[derive(Debug, Default, EntityModel, Serialize)]
