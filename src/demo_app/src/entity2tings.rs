@@ -4,23 +4,24 @@ use serde::Serialize;
 
 #[derive(Entity)]
 #[pk(name = "last_name")]
-#[sk(name = "sk")]
+#[sk(name = "dd")]
+#[nk(name = "type", value = "dynamo")]
 pub struct User {
-    #[pk(order = 0)]
-    pub last_name: String,
-
-    #[pk(order = 1)]
-    pub first_name: String,
-
-    #[sk(order = 0)]
+    #[pk(order = 0, prefix = "ATTR2")]
     pub attribute2: String,
 
-    #[sk(prefix = "ATTRIBUTE3", order = 1)]
+    pub last_name: String,
+
+    #[pk(order = 1, prefix = "FIRSTNAME")]
+    pub first_name: String,
+
+    #[sk(order = 1, prefix = "ATTR3")]
     pub attribute3: String,
 
-    #[sk(prefix = "ATTRIBUTE4", order = 2)]
+    #[sk(order = 0)]
     pub attribute4: String,
 
+    // #[nk]
     pub attribute5: String,
 }
 

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::parse::Parser;
-use syn::{Data, DeriveInput, Error, Lit, Meta};
 use entity_core::{CompositeKey, KeySegment, NonKey, NonKeyKind, NonKeySegment, Schema};
+use proc_macro2::TokenStream;
+use quote::{ToTokens, quote};
+use std::collections::HashMap;
+use syn::parse::Parser;
+use syn::{Attribute, Data, DeriveInput, Error, Lit, Meta};
 
 pub const DELIMITER: char = '#';
 
@@ -17,6 +17,7 @@ pub fn expand_entity(input: &DeriveInput) -> TokenStream {
 fn parse_entity(input: &DeriveInput) -> Result<Schema, Error> {
     let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
     let field_infos = parse_fields(input)?;
+    validate_field_attrs_against_struct_attrs(&pk_def, &sk_def, &field_infos)?;
     let schema = build_ir(pk_def, sk_def, nk_defs, field_infos)?;
     validate_schema(&schema)?;
     Ok(schema)
@@ -141,76 +142,99 @@ fn parse_entity_attrs(
 
 struct FieldInfo {
     field_name: String,
-    pk: Option<(Option<String>, usize)>, // (prefix, order)
-    sk: Option<(Option<String>, usize)>,
-    nks: Vec<(String, Option<String>, usize)>, // (nk name, prefix, order)
+    pk: Option<(Option<String>, Option<usize>)>, // (prefix, order)
+    sk: Option<(Option<String>, Option<usize>)>, // (prefix, order)
+    nks: Vec<(String, Option<String>, Option<usize>)>, // (nk name, prefix, order)
 }
 
 fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
     let mut out = vec![];
 
-    let Data::Struct(ds) = &input.data else {
+    let Data::Struct(data_struct) = &input.data else {
         return Err(Error::new_spanned(
             input,
             "Entity can only be derived for structs",
         ));
     };
 
-    for field in &ds.fields {
+    // let mut sk_attrs = vec![];
+
+    // Every struct has several fields
+    for field in &data_struct.fields {
         let ident = field.ident.as_ref().unwrap();
         let mut pk = None;
         let mut sk = None;
         let mut nks = vec![];
 
+        // Every field has several attributes
         for attr in &field.attrs {
             if attr.path().is_ident("pk")
                 || attr.path().is_ident("sk")
                 || attr.path().is_ident("nk")
             {
-                let meta = attr.meta.clone();
-                if let Meta::List(list) = meta {
-                    let mut prefix = None;
-                    let mut order: Option<usize> = None;
-                    let mut name: Option<String> = None;
+                match &attr.meta {
+                    // #[pk(... = ...)]
+                    Meta::List(list) => {
+                        let mut prefix = None;
+                        let mut order: Option<usize> = None;
+                        let mut name: Option<String> = None;
 
-                    let parsed =
-                        syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
-                            .parse2(list.tokens.clone())?;
+                        let parsed =
+                            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
+                                .parse2(list.tokens.clone())?;
 
-                    for nested in parsed {
-                        if let Meta::NameValue(nv) = nested {
-                            let key = nv.path.get_ident().unwrap().to_string();
-                            if let syn::Expr::Lit(expr_lit) = &nv.value {
-                                match (&key[..], &expr_lit.lit) {
-                                    ("prefix", Lit::Str(s)) => prefix = Some(s.value()),
-                                    ("order", Lit::Int(i)) => order = Some(i.base10_parse()?),
-                                    ("name", Lit::Str(s)) => name = Some(s.value()),
-                                    _ => {
-                                        return Err(Error::new_spanned(
-                                            nv,
-                                            "Unknown field-level attribute",
-                                        ));
+                        for nested in parsed {
+                            if let Meta::NameValue(nv) = nested {
+                                let key = nv.path.get_ident().unwrap().to_string();
+                                if let syn::Expr::Lit(expr_lit) = &nv.value {
+                                    match (&key[..], &expr_lit.lit) {
+                                        ("prefix", Lit::Str(s)) => prefix = Some(s.value()),
+                                        ("order", Lit::Int(i)) => order = Some(i.base10_parse()?),
+                                        ("name", Lit::Str(s)) => name = Some(s.value()),
+                                        _ => {
+                                            return Err(Error::new_spanned(
+                                                nv,
+                                                "Unknown field-level attribute",
+                                            ));
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    let order = order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
+                        let order =
+                            order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
 
-                    if attr.path().is_ident("pk") {
-                        pk = Some((prefix.clone(), order));
-                    }
+                        if attr.path().is_ident("pk") {
+                            pk = Some((prefix.clone(), Some(order)));
+                        }
 
-                    if attr.path().is_ident("sk") {
-                        sk = Some((prefix.clone(), order));
-                    }
+                        if attr.path().is_ident("sk") {
+                            sk = Some((prefix.clone(), Some(order)));
+                        }
 
-                    if attr.path().is_ident("nk") {
-                        let name = name
-                            .ok_or_else(|| Error::new_spanned(attr, "nk field must have name"))?;
-                        nks.push((name, prefix, order));
+                        if attr.path().is_ident("nk") {
+                            let name = name.ok_or_else(|| {
+                                Error::new_spanned(attr, "nk field must have name")
+                            })?;
+                            nks.push((name, prefix, Some(order)));
+                        }
                     }
+                    // #[pk]
+                    Meta::Path(path) => {
+                        if attr.path().is_ident("pk") {
+                            pk = Some((None, None));
+                        }
+
+                        if attr.path().is_ident("sk") {
+                            sk = Some((None, None));
+                        }
+
+                        if attr.path().is_ident("nk") {
+                            nks.push((ident.to_string(), None, None));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -222,6 +246,20 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
             nks,
         });
     }
+
+    // if !sk_attrs.is_empty() {
+    //     for sk_attr in &sk_attrs {
+    //         if sk_attr.path().is_ident("pk") {}
+    //     }
+    //     let mut err = syn::Error::new_spanned(sk_attrs[0], "Conflicting attributes here");
+    //     for attr in &sk_attrs[1..] {
+    //         err.combine(syn::Error::new_spanned(
+    //             attr,
+    //             "Conflicting attribute also here",
+    //         ));
+    //     }
+    //     return Err(err);
+    // }
 
     Ok(out)
 }
@@ -235,7 +273,6 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
 //
 
 fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
-
     let name = &input.ident;
 
     // --- small helpers to turn IR pieces into tokens ---
@@ -272,7 +309,11 @@ fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
             NonKeyKind::Static(v) => {
                 quote! { entity_core::NonKeyKind::Static(#v.to_string()) }
             }
-            NonKeyKind::Composite { value_prefix, value_suffix, segments } => {
+            NonKeyKind::Composite {
+                value_prefix,
+                value_suffix,
+                segments,
+            } => {
                 let vp = opt_str(value_prefix);
                 let vs = opt_str(value_suffix);
 
@@ -509,7 +550,7 @@ fn build_ir(
     //
     // ─── BUILD PK ────────────────────────────────────────────────────────────────
     //
-    let mut pk_segments: Vec<(usize, KeySegment)> = vec![];
+    let mut pk_segments: Vec<(Option<usize>, KeySegment)> = vec![];
     for f in &field_infos {
         if let Some((prefix, order)) = &f.pk {
             pk_segments.push((
@@ -536,7 +577,7 @@ fn build_ir(
     // ─── BUILD SK ────────────────────────────────────────────────────────────────
     //
     let sk = if let Some(sk_def) = sk_def {
-        let mut sk_segments: Vec<(usize, KeySegment)> = vec![];
+        let mut sk_segments: Vec<(Option<usize>, KeySegment)> = vec![];
         for f in &field_infos {
             if let Some((prefix, order)) = &f.sk {
                 sk_segments.push((
@@ -657,7 +698,7 @@ fn validate_schema(schema: &Schema) -> Result<(), syn::Error> {
         if sk.static_value.is_none() && sk.segments.is_empty() {
             return Err(Error::new(
                 proc_macro2::Span::call_site(),
-                "SK must have segments or static value",
+                "SK must have segments or static valueee",
             ));
         }
     }
@@ -669,6 +710,34 @@ fn validate_schema(schema: &Schema) -> Result<(), syn::Error> {
                 return Err(Error::new(
                     proc_macro2::Span::call_site(),
                     format!("NK {} has no segments", nk.attribute_name),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_field_attrs_against_struct_attrs(
+    pk_def: &PkDef,
+    sk_def: &Option<SkDef>,
+    field_infos: &[FieldInfo],
+) -> Result<(), syn::Error> {
+    let sk_fields: Vec<&FieldInfo> = field_infos.iter().filter(|f| f.sk.is_some()).collect();
+    if !sk_fields.is_empty() && sk_def.is_none() {
+        return Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "Fields annotated with #[sk] require a struct-level #[sk(name=...)]",
+        ));
+    }
+
+    // Check if order is specified for sk fields
+    if sk_fields.len() > 1 {
+        for sk_field in sk_fields {
+            if let Some((a, None)) = sk_field.sk.as_ref() {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    "If more than one field contribute to #[sk], #[sk(order=...)]",
                 ));
             }
         }
