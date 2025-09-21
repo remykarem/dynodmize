@@ -18,7 +18,7 @@ pub fn expand_entity(input: &DeriveInput) -> TokenStream {
 
 fn parse_entity(input: &DeriveInput) -> Result<SchemaV2, Error> {
     let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
-    let field_infos = parse_fields(input)?;
+    let field_infos = parse_struct_fields(input)?;
     validate_field_attrs_against_struct_attrs(&pk_def, &sk_def, &field_infos)?;
     let schema = build_ir(pk_def, sk_def, nk_defs, field_infos)?;
     validate_schema(&schema)?;
@@ -33,14 +33,12 @@ struct PkDef {
     name: String,
     value_prefix: Option<String>,
     value_suffix: Option<String>,
-    static_value: Option<String>,
 }
 
 struct SkDef {
     name: String,
     value_prefix: Option<String>,
     value_suffix: Option<String>,
-    static_value: Option<String>,
 }
 
 struct NkDef {
@@ -115,7 +113,6 @@ fn parse_entity_attrs(
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
-                    static_value: static_value.clone(),
                 });
             }
 
@@ -130,7 +127,6 @@ fn parse_entity_attrs(
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
-                    static_value: static_value.clone(),
                 });
             }
 
@@ -161,7 +157,7 @@ struct FieldInfo {
     nks: Vec<(String, Option<String>, Option<usize>)>, // (nk name, prefix, order)
 }
 
-fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
+fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
     let mut out = vec![];
 
     let Data::Struct(data_struct) = &input.data else {
