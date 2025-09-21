@@ -3,11 +3,11 @@ use entity_macros::{Entity, EntityModel, based_on};
 use serde::Serialize;
 
 #[derive(Entity)]
-#[pk(name = "pk")]
 #[sk(
     name = "sk",
     value = "comm",
 )]
+#[pk(name = "hello")]
 pub struct ComplaintComments {
 
     #[pk]

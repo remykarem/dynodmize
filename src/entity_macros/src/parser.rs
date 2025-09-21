@@ -19,7 +19,8 @@ pub fn expand_entity(input: &DeriveInput) -> TokenStream {
 fn parse_entity(input: &DeriveInput) -> Result<SchemaV2, Error> {
     let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
     let field_infos = parse_struct_fields(input)?;
-    validate_field_attrs_against_struct_attrs(&pk_def, &sk_def, &field_infos)?;
+    let (pk_def, sk_def, field_infos) =
+        validate_field_attrs_against_struct_attrs(pk_def, sk_def, field_infos)?;
     let schema = build_ir(pk_def, sk_def, nk_defs, field_infos)?;
     validate_schema(&schema)?;
     Ok(schema)
@@ -29,7 +30,7 @@ fn parse_entity(input: &DeriveInput) -> Result<SchemaV2, Error> {
 // ─── ENTITY LEVEL ATTRS ─────────────────────────────────────────────────────────
 //
 
-struct PkStructDef {
+struct RawPkStructDef {
     name: String,
     value_prefix: Option<String>,
     value_suffix: Option<String>,
@@ -51,7 +52,7 @@ struct RawNkFieldDef {
     order: Option<usize>,
 }
 
-struct SkDef {
+struct RawSkStructDef {
     name: String,
     value_prefix: Option<String>,
     value_suffix: Option<String>,
@@ -66,9 +67,9 @@ struct NkDef {
 
 fn parse_entity_attrs(
     input: &DeriveInput,
-) -> Result<(PkStructDef, Option<SkDef>, Vec<NkDef>), syn::Error> {
-    let mut pk: Option<PkStructDef> = None;
-    let mut sk: Option<SkDef> = None;
+) -> Result<(Option<RawPkStructDef>, Option<RawSkStructDef>, Vec<NkDef>), syn::Error> {
+    let mut pk: Option<RawPkStructDef> = None;
+    let mut sk: Option<RawSkStructDef> = None;
     let mut nks: Vec<NkDef> = vec![];
 
     // A struct can have multiple attributes
@@ -125,7 +126,7 @@ fn parse_entity_attrs(
                 let name = name
                     .clone()
                     .ok_or_else(|| Error::new_spanned(attr, "pk must have a name"))?;
-                pk = Some(PkStructDef {
+                pk = Some(RawPkStructDef {
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
@@ -139,7 +140,7 @@ fn parse_entity_attrs(
                 let name = name
                     .clone()
                     .ok_or_else(|| Error::new_spanned(attr, "sk must have a name"))?;
-                sk = Some(SkDef {
+                sk = Some(RawSkStructDef {
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
@@ -158,7 +159,6 @@ fn parse_entity_attrs(
         }
     }
 
-    let pk = pk.ok_or_else(|| Error::new_spanned(input, "Missing #[pk(...)] at entity level"))?;
     Ok((pk, sk, nks))
 }
 
@@ -168,13 +168,17 @@ fn parse_entity_attrs(
 
 struct RawStructFieldDefs {
     field_name: String,
-    pk_def: Option<RawPkFieldDef>,
-    sk_def: Option<RawSkFieldDef>,
-    nk_defs: Vec<RawNkFieldDef>,
+    raw_field_def: RawFieldDef,
+}
+
+enum RawFieldDef {
+    Pk(RawPkFieldDef),
+    Sk(RawSkFieldDef),
+    Nk(RawNkFieldDef),
 }
 
 fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, syn::Error> {
-    let mut out = vec![];
+    let mut all_field_defs = vec![];
 
     let Data::Struct(data_struct) = &input.data else {
         return Err(Error::new_spanned(
@@ -322,15 +326,27 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
             }
         }
 
-        out.push(RawStructFieldDefs {
-            field_name: ident.to_string(),
-            pk_def: pk_defs.pop(),
-            sk_def: sk_defs.pop(),
-            nk_defs,
-        });
+        for pk_def in pk_defs {
+            all_field_defs.push(RawStructFieldDefs {
+                field_name: ident.to_string(),
+                raw_field_def: RawFieldDef::Pk(pk_def),
+            });
+        }
+        for sk_def in sk_defs {
+            all_field_defs.push(RawStructFieldDefs {
+                field_name: ident.to_string(),
+                raw_field_def: RawFieldDef::Sk(sk_def),
+            });
+        }
+        for nk_def in nk_defs {
+            all_field_defs.push(RawStructFieldDefs {
+                field_name: ident.to_string(),
+                raw_field_def: RawFieldDef::Nk(nk_def),
+            });
+        }
     }
 
-    Ok(out)
+    Ok(all_field_defs)
 }
 
 //
@@ -526,17 +542,17 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
 }
 
 fn build_ir(
-    pk_def: PkStructDef,
-    sk_def: Option<SkDef>,
+    pk_def: RawPkStructDef,
+    sk_def: Option<RawSkStructDef>,
     nk_defs: Vec<NkDef>,
-    field_infos: Vec<RawStructFieldDefs>,
+    field_defs: Vec<RawStructFieldDefs>,
 ) -> Result<SchemaV2, syn::Error> {
     //
     // ─── BUILD PK ────────────────────────────────────────────────────────────────
     //
     let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
-    for f in &field_infos {
-        if let Some(RawPkFieldDef { prefix, order }) = &f.pk_def {
+    for f in &field_defs {
+        if let RawFieldDef::Pk(RawPkFieldDef { prefix, order }) = &f.raw_field_def {
             pk_segments.push((
                 *order,
                 Segment {
@@ -563,8 +579,8 @@ fn build_ir(
     //
     let sk = if let Some(sk_def) = sk_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
-        for field_info in &field_infos {
-            if let Some(RawSkFieldDef { prefix, order }) = &field_info.sk_def {
+        for field_info in &field_defs {
+            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order }) = &field_info.raw_field_def {
                 sk_segments.push((
                     *order,
                     Segment {
@@ -620,14 +636,15 @@ fn build_ir(
     }
 
     // add field-level NKs
-    for field_info in &field_infos {
-        for RawNkFieldDef {
+    for field_info in &field_defs {
+        if let RawFieldDef::Nk(RawNkFieldDef {
             name,
             prefix,
             order,
-        } in &field_info.nk_defs
+        }) = &field_info.raw_field_def
         {
-            let entry = nk_map.entry(name.clone()).or_insert(KeyDef {
+            let nn = name.clone();
+            let entry = nk_map.entry(nn).or_insert(KeyDef {
                 attribute_name: name.clone(),
                 attribute_value: AttributeValue::Composite(CompositeAttributeValue {
                     prefix: None,
@@ -718,30 +735,65 @@ fn validate_schema(schema: &SchemaV2) -> Result<(), syn::Error> {
 }
 
 fn validate_field_attrs_against_struct_attrs(
-    pk_def: &PkStructDef,
-    sk_def: &Option<SkDef>,
-    field_infos: &[RawStructFieldDefs],
-) -> Result<(), syn::Error> {
-    let sk_fields: Vec<&RawStructFieldDefs> =
-        field_infos.iter().filter(|f| f.sk_def.is_some()).collect();
-    if !sk_fields.is_empty() && sk_def.is_none() {
-        return Err(syn::Error::new(
-            proc_macro2::Span::call_site(),
-            "Fields annotated with #[sk] require a struct-level #[sk(name=...)]",
-        ));
-    }
+    pk_struct_def: Option<RawPkStructDef>,
+    sk_struct_def: Option<RawSkStructDef>,
+    field_defs: Vec<RawStructFieldDefs>,
+) -> Result<
+    (
+        RawPkStructDef,
+        Option<RawSkStructDef>,
+        Vec<RawStructFieldDefs>,
+    ),
+    syn::Error,
+> {
+    let pk_def = if let Some(pk_def) = pk_struct_def {
+        pk_def
+    } else {
+        // Make sure there is one and only one PK in field infos
+        let yo: Vec<&RawPkFieldDef> = field_defs
+            .iter()
+            .filter_map(|field| {
+                if let RawFieldDef::Pk(a) = &field.raw_field_def {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if yo.len() != 1 {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "If multiple fields contribute to a pk, there needs to be a struct-level #[pk(name = \"something\"]",
+            ));
+        }
+
+        RawPkStructDef {
+            name: "".to_string(),
+            value_prefix: None,
+            value_suffix: None,
+        }
+    };
+
+    // let sk_fields: Vec<&RawStructFieldDefs> =
+    //     field_defs.iter().filter(|f| f.raw_field_def.is_some()).collect();
+    // if !sk_fields.is_empty() && sk_struct_def.is_none() {
+    //     return Err(syn::Error::new(
+    //         proc_macro2::Span::call_site(),
+    //         "Fields annotated with #[sk] require a struct-level #[sk(name=...)]",
+    //     ));
+    // }
 
     // Check if order is specified for sk fields
-    if sk_fields.len() > 1 {
-        for sk_field in sk_fields {
-            if let Some(RawSkFieldDef { .. }) = sk_field.sk_def.as_ref() {
-                return Err(syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    "If more than one field contribute to #[sk], #[sk(order=...)]",
-                ));
-            }
-        }
-    }
+    // if sk_fields.len() > 1 {
+    //     for sk_field in sk_fields {
+    //         if let Some(RawSkFieldDef { .. }) = sk_field.sk_def.as_ref() {
+    //             return Err(syn::Error::new(
+    //                 proc_macro2::Span::call_site(),
+    //                 "If more than one field contribute to #[sk], #[sk(order=...)]",
+    //             ));
+    //         }
+    //     }
+    // }
 
-    Ok(())
+    Ok((pk_def, sk_struct_def, field_defs))
 }
