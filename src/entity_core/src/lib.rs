@@ -1,9 +1,9 @@
 use aws_sdk_dynamodb::{Client, Error};
 use serde::Serialize;
 use serde_dynamo::to_item;
-use std::fmt::Debug;
-use std::collections::HashSet;
 use serde_json::Value;
+use std::collections::HashSet;
+use std::fmt::Debug;
 
 //
 // ─── ENTITY TRAIT ───────────────────────────────────────────────────────────────
@@ -125,21 +125,6 @@ impl<T: Debug + Default> UpdateBuilderWithSetters<T> {
     }
 }
 
-
-
-pub trait Entity1 {
-    fn get_schema() -> Schema;
-}
-
-#[derive(Debug)]
-pub struct Schema {
-    pub partition_key: CompositeKey,
-    pub sort_key: Option<CompositeKey>,
-    pub non_keys: Vec<NonKey>,
-}
-// attribute name
-// attribute value
-
 #[derive(Debug)]
 pub struct SchemaV2 {
     pub partition_key_def: KeyDef<CompositeAttributeValue>,
@@ -169,41 +154,5 @@ pub struct CompositeAttributeValue {
 #[derive(Debug)]
 pub struct Segment {
     pub struct_field_name: String,
-    pub prefix: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct CompositeKey {
-    pub attribute_name: String,
-    pub value_prefix: Option<String>,
-    pub value_suffix: Option<String>,
-    pub segments: Vec<KeySegment>,    // Vec order is the true order
-}
-
-#[derive(Debug)]
-pub struct KeySegment {
-    pub field_name: String,
-    pub prefix: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct NonKey {
-    pub attribute_name: String,
-    pub kind: NonKeyKind,
-}
-
-#[derive(Debug)]
-pub enum NonKeyKind {
-    Static(String),
-    Composite {
-        value_prefix: Option<String>,
-        value_suffix: Option<String>,
-        segments: Vec<NonKeySegment>,
-    },
-}
-
-#[derive(Debug)]
-pub struct NonKeySegment {
-    pub field_name: String,
     pub prefix: Option<String>,
 }

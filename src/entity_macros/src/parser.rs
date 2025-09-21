@@ -1,14 +1,11 @@
-use entity_core::{
-    AttributeValue, CompositeAttributeValue, CompositeKey, KeyDef, KeySegment, NonKey, NonKeyKind,
-    NonKeySegment, Schema, SchemaV2, Segment,
-};
+use crate::codegen::{tok_key_def, tok_optional_string, tok_segments};
+use entity_core::{AttributeValue, CompositeAttributeValue, KeyDef, SchemaV2, Segment};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use std::collections::{HashMap, HashSet};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{Attribute, Data, DeriveInput, Error, Lit, Meta};
-use crate::codegen::{tok_key_def, tok_optional_string, tok_segments};
 
 pub const DELIMITER: char = '#';
 
@@ -237,11 +234,11 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
                     let order = order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
 
                     if attr.path().is_ident("pk") {
-                        pks.push((prefix.clone(), Some(order)));
+                        pks.push((None, None));
                     }
 
                     if attr.path().is_ident("sk") {
-                        sks.push((prefix.clone(), Some(order)));
+                        pks.push((None, None));
                     }
 
                     if attr.path().is_ident("nk") {
@@ -309,10 +306,6 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
 //
 // ─── CODEGEN ────────────────────────────────────────────────────────────────────
 //
-
-
-
-
 
 fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
     let name = &input.ident;
@@ -462,7 +455,7 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
             }
         }
     });
-    
+
     // --- final impl ---
     quote! {
         impl entity_core::Entity2 for #name {
@@ -536,12 +529,12 @@ fn build_ir(
     //
     let sk = if let Some(sk_def) = sk_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
-        for f in &field_infos {
-            if let Some((prefix, order)) = &f.sk {
+        for field_info in &field_infos {
+            if let Some((prefix, order)) = &field_info.sk {
                 sk_segments.push((
                     *order,
                     Segment {
-                        struct_field_name: f.field_name.clone(),
+                        struct_field_name: field_info.field_name.clone(),
                         prefix: prefix.clone(),
                     },
                 ));
@@ -676,7 +669,7 @@ fn validate_schema(schema: &SchemaV2) -> Result<(), syn::Error> {
             if segments.is_empty() {
                 return Err(Error::new(
                     proc_macro2::Span::call_site(),
-                    "SK must have segments or static valueee",
+                    "NK must have segments or static valueee",
                 ));
             }
         }
