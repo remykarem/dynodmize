@@ -339,7 +339,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
         }
         if !nk_defs.is_empty() {
             let unique_nk_names: HashSet<&str> =
-                nk_defs.iter().map(|nk| nk.field_name.as_str()).collect();
+                nk_defs.iter().map(|nk| nk.name.as_str()).collect();
             if unique_nk_names.len() < nk_defs.len() {
                 return Err(Error::new_spanned(
                     field,

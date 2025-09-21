@@ -2,6 +2,7 @@ use aws_sdk_dynamodb::Client;
 use entity_macros::{based_on, Dynodmize, EntityModel};
 use serde::Serialize;
 
+
 #[derive(Dynodmize)]
 #[pk(name = "mypk")]
 #[sk(name = "combined_sk")]

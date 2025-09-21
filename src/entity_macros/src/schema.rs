@@ -208,11 +208,11 @@ pub fn build_schema(
             let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
             for field_info in &all_field_defs {
                 if let RawStructFieldDefs::Sk(RawSkFieldDef {
-                                                  prefix,
-                                                  order,
-                                                  field_name: name,
-                                                  ..
-                                              }) = &field_info
+                    prefix,
+                    order,
+                    field_name: name,
+                    ..
+                }) = &field_info
                 {
                     sk_segments.push((
                         *order,
@@ -303,9 +303,22 @@ pub fn build_schema(
 
     // add field-level NKs
     for nk_field_def in &nk_field_defs {
-        let RawNkFieldDef { field_name, name: tied_to, prefix, .. } = &nk_field_def;
+        let RawNkFieldDef {
+            field_name,
+            name: tied_to,
+            prefix,
+            ..
+        } = &nk_field_def;
+
+        // Hack
+        let look_up_key = if tied_to.is_empty() {
+            field_name.clone()
+        } else {
+            tied_to.clone()
+        };
+
         nk_map
-            .entry(tied_to.clone())
+            .entry(look_up_key)
             .and_modify(|key_def| {
                 if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
                     &mut key_def.attribute_value
