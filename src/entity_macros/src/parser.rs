@@ -158,8 +158,6 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
         ));
     };
 
-    // let mut sk_attrs = vec![];
-
     // Every struct has several fields
     for field in &data_struct.fields {
         // -----------
@@ -279,20 +277,6 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
             nks,
         });
     }
-
-    // if !sk_attrs.is_empty() {
-    //     for sk_attr in &sk_attrs {
-    //         if sk_attr.path().is_ident("pk") {}
-    //     }
-    //     let mut err = syn::Error::new_spanned(sk_attrs[0], "Conflicting attributes here");
-    //     for attr in &sk_attrs[1..] {
-    //         err.combine(syn::Error::new_spanned(
-    //             attr,
-    //             "Conflicting attribute also here",
-    //         ));
-    //     }
-    //     return Err(err);
-    // }
 
     Ok(out)
 }
