@@ -56,7 +56,7 @@ pub(crate) fn tok_segments(segments: &[Segment]) -> TokenStream {
             },
         }
     });
-    quote! { vec![ #( #parts ),* ] }
+    quote! { Vec::<entity_core::Segment>::from([ #( #parts ),* ]) }
 }
 
 pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
@@ -91,7 +91,7 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
             let name = &nk.attribute_name;
             tok_key_def(name, &nk.attribute_value)
         });
-        quote! { vec![ #( #items ),* ] }
+        quote! { Vec::<entity_core::KeyDef<entity_core::AttributeValue>>::from([ #( #items ),* ]) }
     };
 
     let name = &input.ident;
@@ -105,15 +105,15 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
             .attribute_value
             .segments
             .iter()
-            .map(|seg| {
-                let field = syn::Ident::new(&seg.struct_field_name, proc_macro2::Span::call_site());
-                if let Some(pfx) = &seg.prefix {
+            .map(|segment| {
+                let field = syn::Ident::new(&segment.struct_field_name, proc_macro2::Span::call_site());
+                if let Some(pfx) = &segment.prefix {
                     quote! { format!("{}#{}", #pfx, self.#field) }
                 } else {
                     quote! { self.#field.to_string() }
                 }
             });
-        quote! { vec![ #( #segs ),* ].join("#") }
+        quote! { Vec::<String>::from([ #( #segs ),* ]).join("#") }
     };
 
     //
@@ -121,48 +121,74 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
     //
     let sk_expr = if let Some(sk) = &schema.sort_key_def {
         let sk_name = &sk.attribute_name;
+
         match &sk.attribute_value {
+            // If the sort key is static, directly insert it with the attribute name
             AttributeValue::Static(static_value) => {
                 quote! {
-                    Some((#sk_name.to_string(), #static_value.to_string()))
+                {
+                    let mut map: ::std::collections::HashMap<String, String> = ::std::collections::HashMap::new();
+                    map.insert(#sk_name.to_string(), #static_value.to_string());
+                    map
                 }
             }
+            }
+            // For composite sort keys, compute the value based on segments
             AttributeValue::Composite(CompositeAttributeValue {
-                segments,
-                prefix,
-                suffix,
-            }) => {
-                let segs = segments.iter().map(|seg| {
-                    let field =
-                        syn::Ident::new(&seg.struct_field_name, proc_macro2::Span::call_site());
-
-                    let vs_expr = schema
-                        .partition_key_def
-                        .attribute_value
-                        .suffix // TODO incorrect
-                        .as_ref()
-                        .map(|s| quote! { parts.push(#s.to_string()); });
-                    if let Some(pfx) = &seg.prefix {
-                        quote! {
-                            format!("{}#{}", #pfx, self.#field)
-                        }
+                                          segments,
+                                          prefix,
+                                          suffix,
+                                      }) => {
+                // Generate the parts of the composite key based on the segments
+                let segment_parts = segments.iter().map(|segment| {
+                    let field = syn::Ident::new(&segment.struct_field_name, proc_macro2::Span::call_site());
+                    if let Some(pfx) = &segment.prefix {
+                        // Prefix is included if present
+                        quote! { format!("{}#{}", #pfx, self.#field) }
                     } else {
+                        // Use the field value directly if no prefix
                         quote! { self.#field.to_string() }
                     }
                 });
+
+                // Handle the optional prefix and suffix for the composite key
+                let final_prefix = match prefix {
+                    Some(p) => quote! { parts.push(#p.to_string()); },
+                    None => quote! {},
+                };
+                let final_suffix = match suffix {
+                    Some(s) => quote! { parts.push(#s.to_string()); },
+                    None => quote! {},
+                };
+
                 quote! {
-                    {
-                        let parts: ::std::vec::Vec<::std::string::String> = vec![ #( #segs ),* ];
-                        Some((#sk_name.to_string(), parts.join("#")))
-                    }
+                {
+                    let mut map: ::std::collections::HashMap<String, String> = ::std::collections::HashMap::new();
+
+                    // Collect all parts of the composite sort key
+                    let mut parts: Vec<String> = Vec::new();
+                    #final_prefix
+                    parts.extend(vec![
+                        #(#segment_parts),*
+                    ]);
+                    #final_suffix
+
+                    // Join the parts with "#" and insert into the map
+                    let composite_sk = parts.join("#");
+                    map.insert(#sk_name.to_string(), composite_sk);
+                    map
                 }
+            }
             }
         }
     } else {
-        quote! { None }
-    };
-
-    //
+        quote! {
+        {
+            // Return an empty HashMap if no sort key is defined
+            ::std::collections::HashMap::<String, String>::new()
+        }
+    }
+    };    //
     // ─── NKS ─────────────────────────────────────────────
     //
     let nk_inserts = schema.non_key_defs.iter().map(|nk| {
@@ -210,11 +236,13 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
             fn to_item(&self) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
 
+                // pk
                 map.insert(#pk_attr_name.to_string(), serde_json::Value::String(#pk_expr));
 
-                let sk_expr = #sk_expr;
-                if let Some((attr_name, sk_val)) = sk_expr {
-                    map.insert(attr_name, serde_json::Value::String(sk_val));
+                // sk
+                let sk_map: ::std::collections::HashMap<String, String> = #sk_expr;
+                for (key, value) in sk_map {
+                    map.insert(key, serde_json::Value::String(value));
                 }
 
                 // NKs

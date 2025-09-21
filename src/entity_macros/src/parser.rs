@@ -1,10 +1,11 @@
 use crate::{codegen, schema};
 use entity_core::SchemaV2;
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use std::collections::HashSet;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{Data, DeriveInput, Error, Lit, Meta};
+use syn::spanned::Spanned;
 
 pub const DELIMITER: char = '#';
 
@@ -18,7 +19,7 @@ pub fn expand_entity(input: &DeriveInput) -> TokenStream {
 fn parse_entity(input: &DeriveInput) -> Result<SchemaV2, Error> {
     let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
     let field_infos = parse_struct_fields(input)?;
-    let schema = schema::build_ir(pk_def, sk_def, nk_defs, field_infos)?;
+    let schema = schema::build_schema(pk_def, sk_def, nk_defs, field_infos)?;
     schema::validate_schema(&schema)?;
     Ok(schema)
 }
@@ -38,17 +39,20 @@ pub struct RawPkFieldDef {
     pub name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
+    pub span: Span,
 }
 
 pub struct RawSkFieldDef {
     pub prefix: Option<String>,
     pub order: Option<usize>,
+    pub span: Span,
 }
 
 pub struct RawNkFieldDef {
     pub name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
+    pub span: Span,
 }
 
 pub struct RawSkStructDef {
@@ -168,6 +172,8 @@ fn parse_entity_attrs(
                     static_value,
                 });
             }
+        } else {
+            return Err(Error::new_spanned(attr, "Expected #[pk(...)] or #[sk(...)]"));
         }
     }
 
@@ -256,6 +262,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                             name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: prefix.clone(),
                             order,
+                            span: list.span(),
                         })
                     }
 
@@ -263,6 +270,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                         sk_defs.push(RawSkFieldDef {
                             prefix: prefix.clone(),
                             order,
+                            span: list.span(),
                         })
                     }
 
@@ -273,6 +281,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                             name: name.clone(),
                             prefix,
                             order,
+                            span: list.span(),
                         });
                     }
                 }
@@ -283,6 +292,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                             name: ident.to_string(),
                             prefix: None,
                             order,
+                            span: attr.meta.span(),
                         })
                     }
 
@@ -290,6 +300,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                         sk_defs.push(RawSkFieldDef {
                             prefix: None,
                             order,
+                            span: path.span(),
                         })
                     }
 
@@ -298,6 +309,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                             name: ident.to_string(),
                             prefix: None,
                             order: None,
+                            span: path.span(),
                         });
                     }
                 }
@@ -309,13 +321,13 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
         if pk_defs.len() > 1 {
             return Err(Error::new_spanned(
                 field,
-                "Cannot have more than 1 pk per field",
+                "Cannot have more than 1 #[pk] per field",
             ));
         }
         if sk_defs.len() > 1 {
             return Err(Error::new_spanned(
                 field,
-                "Cannot have more than 1 sk per field",
+                "Cannot have more than 1 #[sk] per field",
             ));
         }
         if !nk_defs.is_empty() {
@@ -328,6 +340,8 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                 ));
             }
         }
+
+        // If multiple pks are defined, check if all of them have order
 
         for pk_def in pk_defs {
             all_field_defs.push(RawStructFieldDefs {

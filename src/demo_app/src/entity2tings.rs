@@ -3,17 +3,15 @@ use entity_macros::{based_on, Entity, EntityModel};
 use serde::Serialize;
 
 #[derive(Entity)]
-#[sk(name = "sorttt")]
-// #[pk(name = "mypk")]
+#[pk(name = "mypk")]
 pub struct ComplaintComments {
 
-    #[pk]
     pub complaint_id: u32,
 
-    #[sk(prefix = "COMMENT_ID", order = 1)]
+    #[pk(order = 1, prefix = "COMMENT_ID")]
     pub comment_id: u32,
 
-    #[sk(prefix = "COMMENT_DATE", order = 2)]
+    #[sk]
     pub comment_date: String,
 
     pub comment_dates: String,

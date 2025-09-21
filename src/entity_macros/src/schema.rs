@@ -6,20 +6,86 @@ use entity_core::{AttributeValue, CompositeAttributeValue, KeyDef, SchemaV2, Seg
 use std::collections::HashMap;
 use syn::Error;
 
-pub fn build_ir(
+pub fn build_schema(
     pk_struct_def: Option<RawPkStructDef>,
     sk_struct_def: Option<RawSkStructDef>,
     nk_defs: Vec<NkDef>,
     field_defs: Vec<RawStructFieldDefs>,
 ) -> Result<SchemaV2, syn::Error> {
+    // If multiple pks are defined, check if all of them have an `order`
+    let pk_segments: Vec<_> = field_defs
+        .iter()
+        .filter_map(|field| {
+            if let RawFieldDef::Pk(pk) = &field.raw_field_def {
+                Some((pk.span, pk)) // Collect the span for better diagnostics
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // If there are multiple PKs, ensure each has an explicit `order` attribute
+    if pk_segments.len() > 1 {
+        let missing_order = pk_segments
+            .iter()
+            .filter(|(_, pk)| pk.order.is_none())
+            .map(|(span, _)| span) // Collect the spans of problematic #[pk] attributes
+            .collect::<Vec<_>>();
+
+        if !missing_order.is_empty() {
+            let mut diagnostic = syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Multiple primary keys defined, but some do not have an `order` attribute:",
+            );
+
+            for span in missing_order {
+                diagnostic.combine(syn::Error::new(
+                    *span,
+                    "This `#[pk]` is missing an `order` attribute.",
+                ));
+            }
+
+            return Err(diagnostic);
+        }
+    }
+
     //
     // ─── BUILD PK ────────────────────────────────────────────────────────────────
     //
-    let pk_def = if let Some(pk_def) = pk_struct_def.clone() {
-        pk_def
+    let pk = if let Some(pk_struct_def) = pk_struct_def {
+        // Source of truth for pk, other fields must conform to it
+        let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
+        for field_def in &field_defs {
+            if let RawFieldDef::Pk(RawPkFieldDef {
+                name,
+                prefix,
+                order,
+                span,
+            }) = &field_def.raw_field_def
+            {
+                pk_segments.push((
+                    *order,
+                    Segment {
+                        struct_field_name: name.clone(),
+                        prefix: prefix.clone(),
+                    },
+                ));
+            }
+        }
+        pk_segments.sort_by_key(|(ord, _)| *ord);
+        let segments: Vec<Segment> = pk_segments.into_iter().map(|(_, seg)| seg).collect();
+
+        KeyDef {
+            attribute_name: pk_struct_def.name,
+            attribute_value: CompositeAttributeValue {
+                prefix: pk_struct_def.value_prefix,
+                suffix: pk_struct_def.value_suffix,
+                segments,
+            },
+        }
     } else {
         // Make sure there is one and only one PK in field infos
-        let yo: Vec<&RawPkFieldDef> = field_defs
+        let mut yo: Vec<&RawPkFieldDef> = field_defs
             .iter()
             .filter_map(|field| {
                 if let RawFieldDef::Pk(a) = &field.raw_field_def {
@@ -35,41 +101,19 @@ pub fn build_ir(
                 "If multiple fields contribute to a pk, there needs to be a struct-level #[pk(name = \"something\"]",
             ));
         }
+        let pk_def = yo.pop().unwrap();
 
-        RawPkStructDef {
-            name: "".to_string(),
-            value_prefix: None,
-            value_suffix: None,
+        KeyDef {
+            attribute_name: pk_def.name.clone(),
+            attribute_value: CompositeAttributeValue {
+                prefix: pk_def.prefix.clone(),
+                suffix: None,
+                segments: vec![Segment {
+                    struct_field_name: pk_def.name.clone(),
+                    prefix: pk_def.prefix.clone(),
+                }],
+            },
         }
-    };
-
-    let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
-    for field_def in &field_defs {
-        if let RawFieldDef::Pk(RawPkFieldDef {
-            name,
-            prefix,
-            order,
-        }) = &field_def.raw_field_def
-        {
-            pk_segments.push((
-                *order,
-                Segment {
-                    struct_field_name: name.clone(),
-                    prefix: prefix.clone(),
-                },
-            ));
-        }
-    }
-    pk_segments.sort_by_key(|(ord, _)| *ord);
-    let pk_segments: Vec<Segment> = pk_segments.into_iter().map(|(_, seg)| seg).collect();
-
-    let pk = KeyDef {
-        attribute_name: pk_struct_def.clone().unwrap().name.clone(),
-        attribute_value: CompositeAttributeValue {
-            prefix: pk_struct_def.clone().unwrap().value_prefix.clone(),
-            suffix: pk_struct_def.unwrap().value_suffix,
-            segments: pk_segments,
-        },
     };
 
     //
@@ -98,7 +142,7 @@ pub fn build_ir(
     let sk = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
-            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order }) = &field_info.raw_field_def {
+            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, .. }) = &field_info.raw_field_def {
                 sk_segments.push((
                     *order,
                     Segment {
@@ -159,6 +203,7 @@ pub fn build_ir(
             name,
             prefix,
             order,
+            span,
         }) = &field_info.raw_field_def
         {
             let nn = name.clone();
@@ -213,28 +258,6 @@ pub fn build_ir(
 }
 
 pub fn validate_schema(schema: &SchemaV2) -> Result<(), syn::Error> {
-    // validate pk
-    if schema.partition_key_def.attribute_value.segments.is_empty() {
-        return Err(Error::new(
-            proc_macro2::Span::call_site(),
-            "PK must have segments or static value",
-        ));
-    }
-
-    // validate sk
-    // if let Some(sk) = &schema.sort_key_def {
-    //     if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
-    //         &sk.attribute_value
-    //     {
-    //         if segments.is_empty() {
-    //             return Err(Error::new(
-    //                 proc_macro2::Span::call_site(),
-    //                 "SK must have segments or static valueee",
-    //             ));
-    //         }
-    //     }
-    // }
-
     // validate NKs
     for nk in &schema.non_key_defs {
         if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
