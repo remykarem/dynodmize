@@ -604,19 +604,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "demo_app"
-version = "0.1.0"
-dependencies = [
- "aws-config",
- "aws-sdk-dynamodb",
- "entity_core",
- "entity_macros",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "deranged"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -684,6 +671,19 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "example_app"
+version = "0.1.0"
+dependencies = [
+ "aws-config",
+ "aws-sdk-dynamodb",
+ "entity_core",
+ "entity_macros",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "fastrand"
