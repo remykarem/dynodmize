@@ -43,6 +43,7 @@ pub struct RawPkFieldDef {
 }
 
 pub struct RawSkFieldDef {
+    pub name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
     pub span: Span,
@@ -268,6 +269,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("sk") {
                         sk_defs.push(RawSkFieldDef {
+                            name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: prefix.clone(),
                             order,
                             span: list.span(),
@@ -298,6 +300,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("sk") {
                         sk_defs.push(RawSkFieldDef {
+                            name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: None,
                             order,
                             span: path.span(),

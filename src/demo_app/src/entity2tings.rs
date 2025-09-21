@@ -4,6 +4,7 @@ use serde::Serialize;
 
 #[derive(Entity)]
 #[pk(name = "mypk")]
+#[sk(name = "combined_sk")]
 pub struct ComplaintComments {
 
     pub complaint_id: u32,
@@ -11,9 +12,10 @@ pub struct ComplaintComments {
     #[pk(order = 1, prefix = "COMMENT_ID")]
     pub comment_id: u32,
 
-    #[sk]
+    #[sk(order = 0)]
     pub comment_date: String,
 
+    #[sk(order = 1)]
     pub comment_dates: String,
 
     pub attribute2: String,

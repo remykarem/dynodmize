@@ -35,13 +35,50 @@ pub fn build_schema(
         if !missing_order.is_empty() {
             let mut diagnostic = syn::Error::new(
                 proc_macro2::Span::call_site(),
-                "Multiple primary keys defined, but some do not have an `order` attribute:",
+                "Multiple primary keys defined, but some do not have an `order` attribute.",
             );
 
             for span in missing_order {
                 diagnostic.combine(syn::Error::new(
                     *span,
                     "This `#[pk]` is missing an `order` attribute.",
+                ));
+            }
+
+            return Err(diagnostic);
+        }
+    }
+
+    // If multiple pks are defined, check if all of them have an `order`
+    let sk_segments: Vec<_> = field_defs
+        .iter()
+        .filter_map(|field| {
+            if let RawFieldDef::Sk(sk) = &field.raw_field_def {
+                Some((sk.span, sk)) // Collect the span for better diagnostics
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // If there are multiple PKs, ensure each has an explicit `order` attribute
+    if sk_segments.len() > 1 {
+        let missing_order = sk_segments
+            .iter()
+            .filter(|(_, pk)| pk.order.is_none())
+            .map(|(span, _)| span) // Collect the spans of problematic #[pk] attributes
+            .collect::<Vec<_>>();
+
+        if !missing_order.is_empty() {
+            let mut diagnostic = syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Multiple sort keys defined, but some do not have an `order` attribute.",
+            );
+
+            for span in missing_order {
+                diagnostic.combine(syn::Error::new(
+                    *span,
+                    "This `#[sk]` attribute is missing an `order` attribute.",
                 ));
             }
 
@@ -142,7 +179,8 @@ pub fn build_schema(
     let sk = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
-            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, .. }) = &field_info.raw_field_def {
+            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, .. }) = &field_info.raw_field_def
+            {
                 sk_segments.push((
                     *order,
                     Segment {
@@ -164,7 +202,39 @@ pub fn build_schema(
             }),
         })
     } else {
-        None
+        // Make sure there is at most one SK in field infos
+        let mut yo: Vec<&RawSkFieldDef> = field_defs
+            .iter()
+            .filter_map(|field| {
+                if let RawFieldDef::Sk(a) = &field.raw_field_def {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if yo.len() > 1 {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "If multiple fields contribute to a sk, there needs to be a struct-level #[sk(name = \"something\"]",
+            ));
+        }
+        let sk_def = yo.pop();
+
+        match sk_def {
+            None => None,
+            Some(sk_def) => Some(KeyDef {
+                attribute_name: sk_def.name.clone(),
+                attribute_value: AttributeValue::Composite(CompositeAttributeValue {
+                    prefix: sk_def.prefix.clone(),
+                    suffix: None,
+                    segments: vec![Segment {
+                        struct_field_name: sk_def.name.clone(),
+                        prefix: sk_def.prefix.clone(),
+                    }],
+                }),
+            }),
+        }
     };
 
     //
