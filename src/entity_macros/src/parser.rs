@@ -7,7 +7,6 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Error, Lit, Meta};
 
-
 pub fn expand_entity(input: &DeriveInput) -> TokenStream {
     match parse_entity(input) {
         Ok(schema) => codegen::generate_impl(input, schema),
@@ -68,8 +67,10 @@ pub struct NkDef {
     pub(crate) static_value: Option<String>,
 }
 
-pub struct RawStructFieldDefs {
-    pub(crate) raw_field_def: RawFieldDef,
+pub enum RawStructFieldDefs {
+    Pk(RawPkFieldDef),
+    Sk(RawSkFieldDef),
+    Nk(RawNkFieldDef),
 }
 
 pub enum RawFieldDef {
@@ -171,7 +172,10 @@ fn parse_entity_attrs(
                 });
             }
         } else {
-            return Err(Error::new_spanned(attr, "Expected #[pk(...)] or #[sk(...)]"));
+            return Err(Error::new_spanned(
+                attr,
+                "Expected #[pk(...)] or #[sk(...)]",
+            ));
         }
     }
 
@@ -344,19 +348,13 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
         // If multiple pks are defined, check if all of them have order
 
         for pk_def in pk_defs {
-            all_field_defs.push(RawStructFieldDefs {
-                raw_field_def: RawFieldDef::Pk(pk_def),
-            });
+            all_field_defs.push(RawStructFieldDefs::Pk(pk_def));
         }
         for sk_def in sk_defs {
-            all_field_defs.push(RawStructFieldDefs {
-                raw_field_def: RawFieldDef::Sk(sk_def),
-            });
+            all_field_defs.push(RawStructFieldDefs::Sk(sk_def));
         }
         for nk_def in nk_defs {
-            all_field_defs.push(RawStructFieldDefs {
-                raw_field_def: RawFieldDef::Nk(nk_def),
-            });
+            all_field_defs.push(RawStructFieldDefs::Nk(nk_def));
         }
     }
 

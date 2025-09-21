@@ -16,7 +16,7 @@ pub fn build_schema(
     let pk_segments: Vec<_> = field_defs
         .iter()
         .filter_map(|field| {
-            if let RawFieldDef::Pk(pk) = &field.raw_field_def {
+            if let RawStructFieldDefs::Pk(pk) = &field {
                 Some((pk.span, pk)) // Collect the span for better diagnostics
             } else {
                 None
@@ -53,7 +53,7 @@ pub fn build_schema(
     let sk_segments: Vec<_> = field_defs
         .iter()
         .filter_map(|field| {
-            if let RawFieldDef::Sk(sk) = &field.raw_field_def {
+            if let RawStructFieldDefs::Sk(sk) = &field {
                 Some((sk.span, sk)) // Collect the span for better diagnostics
             } else {
                 None
@@ -93,12 +93,12 @@ pub fn build_schema(
         // Source of truth for pk, other fields must conform to it
         let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_def in &field_defs {
-            if let RawFieldDef::Pk(RawPkFieldDef {
+            if let RawStructFieldDefs::Pk(RawPkFieldDef {
                 name,
                 prefix,
                 order,
                 span,
-            }) = &field_def.raw_field_def
+            }) = &field_def
             {
                 pk_segments.push((
                     *order,
@@ -125,7 +125,7 @@ pub fn build_schema(
         let mut yo: Vec<&RawPkFieldDef> = field_defs
             .iter()
             .filter_map(|field| {
-                if let RawFieldDef::Pk(a) = &field.raw_field_def {
+                if let RawStructFieldDefs::Pk(a) = &field {
                     Some(a)
                 } else {
                     None
@@ -179,7 +179,12 @@ pub fn build_schema(
     let sort_key_def = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
-            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, name, .. }) = &field_info.raw_field_def
+            if let RawStructFieldDefs::Sk(RawSkFieldDef {
+                prefix,
+                order,
+                name,
+                ..
+            }) = &field_info
             {
                 sk_segments.push((
                     *order,
@@ -206,7 +211,7 @@ pub fn build_schema(
         let mut yo: Vec<&RawSkFieldDef> = field_defs
             .iter()
             .filter_map(|field| {
-                if let RawFieldDef::Sk(a) = &field.raw_field_def {
+                if let RawStructFieldDefs::Sk(a) = &field {
                     Some(a)
                 } else {
                     None
@@ -269,12 +274,12 @@ pub fn build_schema(
 
     // add field-level NKs
     for field_info in &field_defs {
-        if let RawFieldDef::Nk(RawNkFieldDef {
+        if let RawStructFieldDefs::Nk(RawNkFieldDef {
             name,
             prefix,
             order,
             span,
-        }) = &field_info.raw_field_def
+        }) = &field_info
         {
             let nn = name.clone();
             let entry = nk_map.entry(nn).or_insert(KeyDef {
