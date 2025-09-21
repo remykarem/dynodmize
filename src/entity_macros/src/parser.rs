@@ -193,7 +193,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
     let Data::Struct(data_struct) = &input.data else {
         return Err(Error::new_spanned(
             input,
-            "Entity can only be derived for structs",
+            "Dynodmize can only be derived for structs",
         ));
     };
 

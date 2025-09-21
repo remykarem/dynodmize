@@ -1,8 +1,8 @@
 use aws_sdk_dynamodb::Client;
-use entity_macros::{based_on, Entity, EntityModel};
+use entity_macros::{based_on, Dynodmize, EntityModel};
 use serde::Serialize;
 
-#[derive(Entity)]
+#[derive(Dynodmize)]
 #[pk(name = "mypk")]
 #[sk(name = "combined_sk")]
 #[nk(name = "type", value = "dynamo")]
@@ -26,7 +26,7 @@ pub struct ComplaintComments {
 }
 
 
-#[derive(Entity)]
+#[derive(Dynodmize)]
 #[pk(name = "last_name")]
 #[sk(name = "dd")]
 #[nk(name = "type", value = "dynamo")]

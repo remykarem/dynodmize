@@ -6,7 +6,7 @@ use std::fmt::Debug;
 //
 // ─── ENTITY TRAIT ───────────────────────────────────────────────────────────────
 //
-pub trait Entity {
+pub trait Dynodmize {
     fn get_partition_key(&self) -> String;
     fn get_sort_key(&self) -> Option<String> {
         None

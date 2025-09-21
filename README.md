@@ -7,7 +7,7 @@ Yet another attempt of ODM for DynamoDB.
 Define:
 
 ```rust
-#[derive(Entity)]
+#[derive(Dynodmize)]
 #[pk(
 	name = "pk",
 	value_suffix = "follower",

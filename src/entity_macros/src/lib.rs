@@ -9,7 +9,7 @@ use syn::{DeriveInput, ItemStruct, parse_macro_input};
 const PARTITION: &str = "partition_key";
 const SORT: &str = "sort";
 
-#[proc_macro_derive(Entity, attributes(pk, sk, nk))]
+#[proc_macro_derive(Dynodmize, attributes(pk, sk, nk))]
 pub fn derive_entity(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::DeriveInput);
     parser::expand_entity(&input).into()
@@ -85,8 +85,8 @@ pub fn derive_entity_model(input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        // Implement core Entity methods
-        impl entity_core::Entity for #name {
+        // Implement core Dynodmize methods
+        impl entity_core::Dynodmize for #name {
             fn get_partition_key(&self) -> String {
                 self.#pk_field.clone()
             }
