@@ -17,7 +17,7 @@ pub struct ComplaintComments {
 
     pub comment_date: String,
 
-    #[pk(order = 2)]
+    #[pk(prefix = "dd")]
     pub comment_dates: String,
 
     pub attribute2: String,
