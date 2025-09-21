@@ -4,10 +4,9 @@ use proc_macro2::{Span, TokenStream};
 use std::collections::HashSet;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
-use syn::{Data, DeriveInput, Error, Lit, Meta};
 use syn::spanned::Spanned;
+use syn::{Data, DeriveInput, Error, Lit, Meta};
 
-pub const DELIMITER: char = '#';
 
 pub fn expand_entity(input: &DeriveInput) -> TokenStream {
     match parse_entity(input) {
@@ -20,7 +19,6 @@ fn parse_entity(input: &DeriveInput) -> Result<SchemaV2, Error> {
     let (pk_def, sk_def, nk_defs) = parse_entity_attrs(input)?;
     let field_infos = parse_struct_fields(input)?;
     let schema = schema::build_schema(pk_def, sk_def, nk_defs, field_infos)?;
-    schema::validate_schema(&schema)?;
     Ok(schema)
 }
 

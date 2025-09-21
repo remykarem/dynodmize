@@ -89,7 +89,7 @@ pub fn build_schema(
     //
     // ─── BUILD PK ────────────────────────────────────────────────────────────────
     //
-    let pk = if let Some(pk_struct_def) = pk_struct_def {
+    let partition_key_def = if let Some(pk_struct_def) = pk_struct_def {
         // Source of truth for pk, other fields must conform to it
         let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_def in &field_defs {
@@ -176,7 +176,7 @@ pub fn build_schema(
     //         }
     //     }
     // }
-    let sk = if let Some(sk_def) = sk_struct_def {
+    let sort_key_def = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
             if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, .. }) = &field_info.raw_field_def
@@ -307,7 +307,7 @@ pub fn build_schema(
     }
 
     // sort NK segments by order and flatten
-    let mut non_keys: Vec<KeyDef<AttributeValue>> = vec![];
+    let mut non_key_defs: Vec<KeyDef<AttributeValue>> = vec![];
     for (_, mut nk) in nk_map {
         if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
             &mut nk.attribute_value
@@ -317,30 +317,12 @@ pub fn build_schema(
                 ordered.push(seg);
             }
         }
-        non_keys.push(nk);
+        non_key_defs.push(nk);
     }
 
     Ok(SchemaV2 {
-        partition_key_def: pk,
-        sort_key_def: sk,
-        non_key_defs: non_keys,
+        partition_key_def,
+        sort_key_def,
+        non_key_defs,
     })
-}
-
-pub fn validate_schema(schema: &SchemaV2) -> Result<(), syn::Error> {
-    // validate NKs
-    for nk in &schema.non_key_defs {
-        if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
-            &nk.attribute_value
-        {
-            if segments.is_empty() {
-                return Err(Error::new(
-                    proc_macro2::Span::call_site(),
-                    "NK must have segments or static valueee",
-                ));
-            }
-        }
-    }
-
-    Ok(())
 }

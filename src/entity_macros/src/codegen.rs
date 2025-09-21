@@ -3,6 +3,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::DeriveInput;
 
+pub const DELIMITER: char = '#';
+
 pub fn tok_optional_string(v: &Option<String>) -> TokenStream {
     match v {
         Some(s) => quote! { Some(#s.to_string()) },
@@ -212,7 +214,7 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
                 });
                 quote! {
                     map.insert(#name.to_string(),
-                        serde_json::Value::String(vec![ #( #segs ),* ].join("#")));
+                        serde_json::Value::String(Vec::<String>::from([ #( #segs ),* ]).join("#")));
                 }
             }
         }
@@ -233,6 +235,7 @@ pub fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
                 }
             }
 
+            /// Serialize to `serde_json::Value`
             fn to_item(&self) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
 

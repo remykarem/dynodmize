@@ -18,6 +18,7 @@ pub struct ComplaintComments {
     #[sk(order = 1)]
     pub comment_dates: String,
 
+    #[nk]
     pub attribute2: String,
 }
 
@@ -41,7 +42,7 @@ pub struct User {
     #[sk(order = 0)]
     pub attribute4: String,
 
-    // #[nk]
+    #[nk]
     pub attribute5: String,
 }
 
