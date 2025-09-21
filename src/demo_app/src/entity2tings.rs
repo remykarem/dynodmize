@@ -5,20 +5,23 @@ use serde::Serialize;
 #[derive(Entity)]
 #[pk(name = "mypk")]
 #[sk(name = "combined_sk")]
+#[nk(name = "type", value = "dynamo")]
+#[nk(name = "type2")]
 pub struct ComplaintComments {
 
+    #[sk(order = 0, prefix = "COMPLAINT_ID")]
     pub complaint_id: u32,
 
     #[pk(order = 1, prefix = "COMMENT_ID")]
     pub comment_id: u32,
 
-    #[sk(order = 0)]
+    #[pk(order = 2, prefix = "COMMENT_DATE")]
     pub comment_date: String,
 
-    #[sk(order = 1)]
+    #[nk(name = "type2", order = 0, prefix = "COMMENT_DATES")]
     pub comment_dates: String,
 
-    #[nk]
+    #[nk(name = "type2", order = 1, prefix = "ATTR2")]
     pub attribute2: String,
 }
 

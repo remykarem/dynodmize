@@ -33,20 +33,21 @@ pub struct RawPkStructDef {
 }
 
 pub struct RawPkFieldDef {
-    pub name: String,
+    pub field_name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
     pub span: Span,
 }
 
 pub struct RawSkFieldDef {
-    pub name: String,
+    pub field_name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
     pub span: Span,
 }
 
 pub struct RawNkFieldDef {
+    pub field_name: String,
     pub name: String,
     pub prefix: Option<String>,
     pub order: Option<usize>,
@@ -57,10 +58,10 @@ pub struct RawSkStructDef {
     pub(crate) name: String,
     pub(crate) value_prefix: Option<String>,
     pub(crate) value_suffix: Option<String>,
-    value: Option<String>,
+    pub(crate) static_value: Option<String>,
 }
 
-pub struct NkDef {
+pub struct RawNkStructDef {
     pub(crate) name: String,
     pub(crate) value_prefix: Option<String>,
     pub(crate) value_suffix: Option<String>,
@@ -81,10 +82,10 @@ pub enum RawFieldDef {
 
 fn parse_entity_attrs(
     input: &DeriveInput,
-) -> Result<(Option<RawPkStructDef>, Option<RawSkStructDef>, Vec<NkDef>), syn::Error> {
+) -> Result<(Option<RawPkStructDef>, Option<RawSkStructDef>, Vec<RawNkStructDef>), syn::Error> {
     let mut pk: Option<RawPkStructDef> = None;
     let mut sk: Option<RawSkStructDef> = None;
-    let mut nks: Vec<NkDef> = vec![];
+    let mut nks: Vec<RawNkStructDef> = vec![];
 
     // A struct can have multiple attributes
     for attr in &input.attrs {
@@ -158,13 +159,13 @@ fn parse_entity_attrs(
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
-                    value: static_value.clone(),
+                    static_value: static_value.clone(),
                 });
             }
 
             if attr.path().is_ident("nk") {
                 let name = name.ok_or_else(|| Error::new_spanned(attr, "nk must have a name"))?;
-                nks.push(NkDef {
+                nks.push(RawNkStructDef {
                     name,
                     value_prefix,
                     value_suffix,
@@ -261,7 +262,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("pk") {
                         pk_defs.push(RawPkFieldDef {
-                            name: name.clone().unwrap_or_else(|| ident.to_string()),
+                            field_name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: prefix.clone(),
                             order,
                             span: list.span(),
@@ -270,7 +271,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("sk") {
                         sk_defs.push(RawSkFieldDef {
-                            name: name.clone().unwrap_or_else(|| ident.to_string()),
+                            field_name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: prefix.clone(),
                             order,
                             span: list.span(),
@@ -284,6 +285,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                             name: name.clone(),
                             prefix,
                             order,
+                            field_name: ident.to_string(),
                             span: list.span(),
                         });
                     }
@@ -292,7 +294,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
                 Meta::Path(path) => {
                     if attr.path().is_ident("pk") {
                         pk_defs.push(RawPkFieldDef {
-                            name: ident.to_string(),
+                            field_name: ident.to_string(),
                             prefix: None,
                             order,
                             span: attr.meta.span(),
@@ -301,7 +303,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("sk") {
                         sk_defs.push(RawSkFieldDef {
-                            name: name.clone().unwrap_or_else(|| ident.to_string()),
+                            field_name: name.clone().unwrap_or_else(|| ident.to_string()),
                             prefix: None,
                             order,
                             span: path.span(),
@@ -310,9 +312,10 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
                     if attr.path().is_ident("nk") {
                         nk_defs.push(RawNkFieldDef {
-                            name: ident.to_string(),
+                            field_name: ident.to_string(),
                             prefix: None,
                             order: None,
+                            name: "".to_string(),
                             span: path.span(),
                         });
                     }
@@ -336,7 +339,7 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
         }
         if !nk_defs.is_empty() {
             let unique_nk_names: HashSet<&str> =
-                nk_defs.iter().map(|nk| nk.name.as_str()).collect();
+                nk_defs.iter().map(|nk| nk.field_name.as_str()).collect();
             if unique_nk_names.len() < nk_defs.len() {
                 return Err(Error::new_spanned(
                     field,

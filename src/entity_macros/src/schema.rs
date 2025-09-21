@@ -1,5 +1,5 @@
 use crate::parser::{
-    NkDef, RawFieldDef, RawNkFieldDef, RawPkFieldDef, RawPkStructDef, RawSkFieldDef,
+    RawFieldDef, RawNkFieldDef, RawNkStructDef, RawPkFieldDef, RawPkStructDef, RawSkFieldDef,
     RawSkStructDef, RawStructFieldDefs,
 };
 use entity_core::{AttributeValue, CompositeAttributeValue, KeyDef, SchemaV2, Segment};
@@ -9,15 +9,34 @@ use syn::Error;
 pub fn build_schema(
     pk_struct_def: Option<RawPkStructDef>,
     sk_struct_def: Option<RawSkStructDef>,
-    nk_defs: Vec<NkDef>,
-    field_defs: Vec<RawStructFieldDefs>,
+    nk_struct_defs: Vec<RawNkStructDef>,
+    all_field_defs: Vec<RawStructFieldDefs>,
 ) -> Result<SchemaV2, syn::Error> {
-    // If multiple pks are defined, check if all of them have an `order`
-    let pk_segments: Vec<_> = field_defs
+    let pk_field_defs: Vec<&RawPkFieldDef> = all_field_defs
         .iter()
         .filter_map(|field| {
             if let RawStructFieldDefs::Pk(pk) = &field {
-                Some((pk.span, pk)) // Collect the span for better diagnostics
+                Some(pk)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let sk_field_defs: Vec<&RawSkFieldDef> = all_field_defs
+        .iter()
+        .filter_map(|field| {
+            if let RawStructFieldDefs::Sk(sk) = &field {
+                Some(sk)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let nk_field_defs: Vec<&RawNkFieldDef> = all_field_defs
+        .iter()
+        .filter_map(|field| {
+            if let RawStructFieldDefs::Nk(nk) = &field {
+                Some(nk)
             } else {
                 None
             }
@@ -25,11 +44,11 @@ pub fn build_schema(
         .collect();
 
     // If there are multiple PKs, ensure each has an explicit `order` attribute
-    if pk_segments.len() > 1 {
-        let missing_order = pk_segments
+    if pk_field_defs.len() > 1 {
+        let missing_order = pk_field_defs
             .iter()
-            .filter(|(_, pk)| pk.order.is_none())
-            .map(|(span, _)| span) // Collect the spans of problematic #[pk] attributes
+            .filter(|pk| pk.order.is_none())
+            .map(|pk| pk.span) // Collect the spans of problematic #[pk] attributes
             .collect::<Vec<_>>();
 
         if !missing_order.is_empty() {
@@ -40,7 +59,7 @@ pub fn build_schema(
 
             for span in missing_order {
                 diagnostic.combine(syn::Error::new(
-                    *span,
+                    span,
                     "This `#[pk]` is missing an `order` attribute.",
                 ));
             }
@@ -49,24 +68,12 @@ pub fn build_schema(
         }
     }
 
-    // If multiple pks are defined, check if all of them have an `order`
-    let sk_segments: Vec<_> = field_defs
-        .iter()
-        .filter_map(|field| {
-            if let RawStructFieldDefs::Sk(sk) = &field {
-                Some((sk.span, sk)) // Collect the span for better diagnostics
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // If there are multiple PKs, ensure each has an explicit `order` attribute
-    if sk_segments.len() > 1 {
-        let missing_order = sk_segments
+    // If there are multiple SKs, ensure each has an explicit `order` attribute
+    if sk_field_defs.len() > 1 {
+        let missing_order = sk_field_defs
             .iter()
-            .filter(|(_, pk)| pk.order.is_none())
-            .map(|(span, _)| span) // Collect the spans of problematic #[pk] attributes
+            .filter(|sk| sk.order.is_none())
+            .map(|sk| sk.span) // Collect the spans of problematic #[pk] attributes
             .collect::<Vec<_>>();
 
         if !missing_order.is_empty() {
@@ -77,7 +84,7 @@ pub fn build_schema(
 
             for span in missing_order {
                 diagnostic.combine(syn::Error::new(
-                    *span,
+                    span,
                     "This `#[sk]` attribute is missing an `order` attribute.",
                 ));
             }
@@ -92,22 +99,20 @@ pub fn build_schema(
     let partition_key_def = if let Some(pk_struct_def) = pk_struct_def {
         // Source of truth for pk, other fields must conform to it
         let mut pk_segments: Vec<(Option<usize>, Segment)> = vec![];
-        for field_def in &field_defs {
-            if let RawStructFieldDefs::Pk(RawPkFieldDef {
-                name,
+        for pk_field_def in pk_field_defs {
+            let RawPkFieldDef {
+                field_name: name,
                 prefix,
                 order,
-                span,
-            }) = &field_def
-            {
-                pk_segments.push((
-                    *order,
-                    Segment {
-                        struct_field_name: name.clone(),
-                        prefix: prefix.clone(),
-                    },
-                ));
-            }
+                ..
+            } = &pk_field_def;
+            pk_segments.push((
+                *order,
+                Segment {
+                    struct_field_name: name.clone(),
+                    prefix: prefix.clone(),
+                },
+            ));
         }
         pk_segments.sort_by_key(|(ord, _)| *ord);
         let segments: Vec<Segment> = pk_segments.into_iter().map(|(_, seg)| seg).collect();
@@ -122,7 +127,7 @@ pub fn build_schema(
         }
     } else {
         // Make sure there is one and only one PK in field infos
-        let mut yo: Vec<&RawPkFieldDef> = field_defs
+        let mut yo: Vec<&RawPkFieldDef> = all_field_defs
             .iter()
             .filter_map(|field| {
                 if let RawStructFieldDefs::Pk(a) = &field {
@@ -141,12 +146,12 @@ pub fn build_schema(
         let pk_def = yo.pop().unwrap();
 
         KeyDef {
-            attribute_name: pk_def.name.clone(),
+            attribute_name: pk_def.field_name.clone(),
             attribute_value: CompositeAttributeValue {
                 prefix: pk_def.prefix.clone(),
                 suffix: None,
                 segments: vec![Segment {
-                    struct_field_name: pk_def.name.clone(),
+                    struct_field_name: pk_def.field_name.clone(),
                     prefix: pk_def.prefix.clone(),
                 }],
             },
@@ -177,38 +182,62 @@ pub fn build_schema(
     //     }
     // }
     let sort_key_def = if let Some(sk_def) = sk_struct_def {
-        let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
-        for field_info in &field_defs {
-            if let RawStructFieldDefs::Sk(RawSkFieldDef {
-                prefix,
-                order,
-                name,
-                ..
-            }) = &field_info
-            {
-                sk_segments.push((
-                    *order,
-                    Segment {
-                        struct_field_name: name.clone(),
-                        prefix: prefix.clone(),
-                    },
-                ));
-            }
-        }
-        sk_segments.sort_by_key(|(ord, _)| *ord);
-        let sk_segments: Vec<Segment> = sk_segments.into_iter().map(|(_, seg)| seg).collect();
+        if let Some(static_value) = sk_def.static_value {
+            // Ensure that no other field defs with sk
+            if !sk_field_defs.is_empty() {
+                let mut diagnostic = syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    "If a struct-level #[sk(name = ..., value = ...)] with static value is defined, no other fields can be annotated with #[sk]",
+                );
 
-        Some(KeyDef {
-            attribute_name: sk_def.name,
-            attribute_value: AttributeValue::Composite(CompositeAttributeValue {
-                prefix: sk_def.value_prefix,
-                suffix: sk_def.value_suffix,
-                segments: sk_segments,
-            }),
-        })
+                for sk_field_def in sk_field_defs {
+                    diagnostic.combine(syn::Error::new(
+                        sk_field_def.span,
+                        "This field defines `#[sk]`.",
+                    ));
+                }
+
+                return Err(diagnostic);
+            }
+
+            Some(KeyDef {
+                attribute_name: sk_def.name,
+                attribute_value: AttributeValue::Static(static_value),
+            })
+        } else {
+            let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
+            for field_info in &all_field_defs {
+                if let RawStructFieldDefs::Sk(RawSkFieldDef {
+                                                  prefix,
+                                                  order,
+                                                  field_name: name,
+                                                  ..
+                                              }) = &field_info
+                {
+                    sk_segments.push((
+                        *order,
+                        Segment {
+                            struct_field_name: name.clone(),
+                            prefix: prefix.clone(),
+                        },
+                    ));
+                }
+            }
+            sk_segments.sort_by_key(|(ord, _)| *ord);
+            let sk_segments: Vec<Segment> = sk_segments.into_iter().map(|(_, seg)| seg).collect();
+
+            Some(KeyDef {
+                attribute_name: sk_def.name,
+                attribute_value: AttributeValue::Composite(CompositeAttributeValue {
+                    prefix: sk_def.value_prefix,
+                    suffix: sk_def.value_suffix,
+                    segments: sk_segments,
+                }),
+            })
+        }
     } else {
         // Make sure there is at most one SK in field infos
-        let mut yo: Vec<&RawSkFieldDef> = field_defs
+        let mut yo: Vec<&RawSkFieldDef> = all_field_defs
             .iter()
             .filter_map(|field| {
                 if let RawStructFieldDefs::Sk(a) = &field {
@@ -229,12 +258,12 @@ pub fn build_schema(
         match sk_def {
             None => None,
             Some(sk_def) => Some(KeyDef {
-                attribute_name: sk_def.name.clone(),
+                attribute_name: sk_def.field_name.clone(),
                 attribute_value: AttributeValue::Composite(CompositeAttributeValue {
                     prefix: sk_def.prefix.clone(),
                     suffix: None,
                     segments: vec![Segment {
-                        struct_field_name: sk_def.name.clone(),
+                        struct_field_name: sk_def.field_name.clone(),
                         prefix: sk_def.prefix.clone(),
                     }],
                 }),
@@ -248,23 +277,23 @@ pub fn build_schema(
     let mut nk_map: HashMap<String, KeyDef<AttributeValue>> = HashMap::new();
 
     // start with struct-level NKs
-    for nk_def in nk_defs {
-        if let Some(v) = nk_def.static_value {
+    for nk_struct_def in nk_struct_defs {
+        if let Some(v) = nk_struct_def.static_value {
             nk_map.insert(
-                nk_def.name.clone(),
+                nk_struct_def.name.clone(),
                 KeyDef {
-                    attribute_name: nk_def.name,
+                    attribute_name: nk_struct_def.name,
                     attribute_value: AttributeValue::Static(v),
                 },
             );
         } else {
             nk_map.insert(
-                nk_def.name.clone(),
+                nk_struct_def.name.clone(),
                 KeyDef {
-                    attribute_name: nk_def.name,
+                    attribute_name: nk_struct_def.name,
                     attribute_value: AttributeValue::Composite(CompositeAttributeValue {
-                        prefix: nk_def.value_prefix,
-                        suffix: nk_def.value_suffix,
+                        prefix: nk_struct_def.value_prefix,
+                        suffix: nk_struct_def.value_suffix,
                         segments: vec![],
                     }),
                 },
@@ -273,57 +302,36 @@ pub fn build_schema(
     }
 
     // add field-level NKs
-    for field_info in &field_defs {
-        if let RawStructFieldDefs::Nk(RawNkFieldDef {
-            name,
-            prefix,
-            order,
-            span,
-        }) = &field_info
-        {
-            let nn = name.clone();
-            let entry = nk_map.entry(nn).or_insert(KeyDef {
-                attribute_name: name.clone(),
-                attribute_value: AttributeValue::Composite(CompositeAttributeValue {
-                    prefix: None,
-                    suffix: None,
-                    segments: vec![],
-                }),
-            });
-
-            match &mut entry.attribute_value {
-                AttributeValue::Static(_) => {
-                    return Err(Error::new_spanned(
-                        &name,
-                        format!(
-                            "NK {} is defined as static at struct level and cannot have field segments",
-                            name
-                        ),
-                    ));
-                }
-                AttributeValue::Composite(CompositeAttributeValue { segments, .. }) => {
+    for nk_field_def in &nk_field_defs {
+        let RawNkFieldDef { field_name, name: tied_to, prefix, .. } = &nk_field_def;
+        nk_map
+            .entry(tied_to.clone())
+            .and_modify(|key_def| {
+                if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
+                    &mut key_def.attribute_value
+                {
                     segments.push(Segment {
-                        struct_field_name: name.clone(),
+                        struct_field_name: field_name.clone(),
                         prefix: prefix.clone(),
                     });
                 }
-            }
-        }
+            })
+            .or_insert(KeyDef {
+                attribute_name: field_name.clone(),
+                attribute_value: AttributeValue::Composite(CompositeAttributeValue {
+                    prefix: None,
+                    suffix: None,
+                    segments: vec![Segment {
+                        struct_field_name: field_name.clone(),
+                        prefix: prefix.clone(),
+                    }],
+                }),
+            });
     }
 
     // sort NK segments by order and flatten
-    let mut non_key_defs: Vec<KeyDef<AttributeValue>> = vec![];
-    for (_, mut nk) in nk_map {
-        if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
-            &mut nk.attribute_value
-        {
-            let mut ordered: Vec<Segment> = vec![];
-            for seg in std::mem::take(segments) {
-                ordered.push(seg);
-            }
-        }
-        non_key_defs.push(nk);
-    }
+
+    let non_key_defs: Vec<KeyDef<AttributeValue>> = nk_map.into_values().collect();
 
     Ok(SchemaV2 {
         partition_key_def,
