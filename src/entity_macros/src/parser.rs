@@ -545,8 +545,8 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
 // }
 
 fn build_ir(
-    pk_def: RawPkStructDef,
-    sk_def: Option<RawSkStructDef>,
+    pk_struct_def: RawPkStructDef,
+    sk_struct_def: Option<RawSkStructDef>,
     nk_defs: Vec<NkDef>,
     field_defs: Vec<RawStructFieldDefs>,
 ) -> Result<SchemaV2, syn::Error> {
@@ -569,10 +569,10 @@ fn build_ir(
     let pk_segments: Vec<Segment> = pk_segments.into_iter().map(|(_, seg)| seg).collect();
 
     let pk = KeyDef {
-        attribute_name: pk_def.name,
+        attribute_name: pk_struct_def.name,
         attribute_value: CompositeAttributeValue {
-            prefix: pk_def.value_prefix,
-            suffix: pk_def.value_suffix,
+            prefix: pk_struct_def.value_prefix,
+            suffix: pk_struct_def.value_suffix,
             segments: pk_segments,
         },
     };
@@ -580,7 +580,7 @@ fn build_ir(
     //
     // ─── BUILD SK ────────────────────────────────────────────────────────────────
     //
-    let sk = if let Some(sk_def) = sk_def {
+    let sk = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
             if let RawFieldDef::Sk(RawSkFieldDef { prefix, order }) = &field_info.raw_field_def {
