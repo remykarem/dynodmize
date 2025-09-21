@@ -1,8 +1,6 @@
 use aws_sdk_dynamodb::{Client, Error};
 use serde::Serialize;
 use serde_dynamo::to_item;
-use serde_json::Value;
-use std::collections::HashSet;
 use std::fmt::Debug;
 
 //

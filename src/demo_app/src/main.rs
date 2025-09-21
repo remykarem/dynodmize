@@ -1,12 +1,11 @@
 mod entity2tings;
 
-use crate::entity2tings::{ComplaintComments, Entity2Repo, MyEntity2, MyEntity2Setters, User};
+use crate::entity2tings::{ComplaintComments, Entity2Repo, MyEntity2, MyEntity2Setters};
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_dynamodb::config::{BehaviorVersion, Region};
 use aws_sdk_dynamodb::Client;
-use entity_core::*;
-use serde::Serialize;
 use entity_core::Entity2;
+use entity_core::*;
 // #[tokio::main]
 // async fn main() {
 //     main2().await
@@ -24,6 +23,7 @@ fn main() {
     //     attribute5: "uu".to_string(),
     // };
     // println!("{}", user.to_item());
+    println!("{:?}", ComplaintComments::get_schema());
     let ent = ComplaintComments {
         complaint_id: 123,
         comment_date: "somedate".to_string(),
@@ -35,6 +35,7 @@ fn main() {
     
 }
 
+#[allow(dead_code)]
 async fn main2() {
     let region_provider =
         RegionProviderChain::default_provider().or_else(Region::new("ap-southeast-1"));

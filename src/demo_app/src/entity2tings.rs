@@ -1,13 +1,10 @@
-use std::alloc;
-use aws_sdk_dynamodb::{Client, Error};
-use entity_macros::{Entity, EntityModel, based_on};
+use aws_sdk_dynamodb::Client;
+use entity_macros::{based_on, Entity, EntityModel};
 use serde::Serialize;
 
 #[derive(Entity)]
-#[sk(
-    name = "sk",
-)]
-#[pk(name = "hello")]
+#[sk(name = "sorttt")]
+// #[pk(name = "mypk")]
 pub struct ComplaintComments {
 
     #[pk]
@@ -19,7 +16,6 @@ pub struct ComplaintComments {
     #[sk(prefix = "COMMENT_DATE", order = 2)]
     pub comment_date: String,
 
-    #[pk(prefix = "dd")]
     pub comment_dates: String,
 
     pub attribute2: String,

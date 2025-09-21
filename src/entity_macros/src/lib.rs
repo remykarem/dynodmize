@@ -1,5 +1,6 @@
 mod parser;
 mod codegen;
+mod schema;
 
 use proc_macro::TokenStream;
 use quote::quote;
