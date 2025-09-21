@@ -27,9 +27,12 @@ fn main() {
     let ent = ComplaintComments {
         complaint_id: 123,
         comment_date: "somedate".to_string(),
+        comment_dates: "somedatess".to_string(),
         comment_id: 456,
+        attribute2: "d".to_string(),
     };
     println!("{}", ent.to_item());
+    
 }
 
 async fn main2() {

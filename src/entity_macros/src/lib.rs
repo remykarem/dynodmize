@@ -1,4 +1,5 @@
 mod parser;
+mod codegen;
 
 use proc_macro::TokenStream;
 use quote::quote;

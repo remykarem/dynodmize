@@ -15,7 +15,7 @@ pub trait Entity {
     }
 }
 pub trait Entity2 {
-    fn get_schema() -> Schema;
+    fn get_schema() -> SchemaV2;
     fn to_item(&self) -> serde_json::Value;
 }
 
@@ -137,13 +137,46 @@ pub struct Schema {
     pub sort_key: Option<CompositeKey>,
     pub non_keys: Vec<NonKey>,
 }
+// attribute name
+// attribute value
+
+#[derive(Debug)]
+pub struct SchemaV2 {
+    pub partition_key_def: KeyDef<CompositeAttributeValue>,
+    pub sort_key_def: Option<KeyDef<AttributeValue>>,
+    pub non_key_defs: Vec<KeyDef<AttributeValue>>,
+}
+
+#[derive(Debug)]
+pub struct KeyDef<V> {
+    pub attribute_name: String,
+    pub attribute_value: V,
+}
+
+#[derive(Debug)]
+pub enum AttributeValue {
+    Static(String),
+    Composite(CompositeAttributeValue),
+}
+
+#[derive(Debug)]
+pub struct CompositeAttributeValue {
+    pub segments: Vec<Segment>,
+    pub prefix: Option<String>,
+    pub suffix: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct Segment {
+    pub struct_field_name: String,
+    pub prefix: Option<String>,
+}
 
 #[derive(Debug)]
 pub struct CompositeKey {
     pub attribute_name: String,
     pub value_prefix: Option<String>,
     pub value_suffix: Option<String>,
-    pub static_value: Option<String>, // mutually exclusive with segments
     pub segments: Vec<KeySegment>,    // Vec order is the true order
 }
 

@@ -6,25 +6,21 @@ use serde::Serialize;
 #[pk(name = "pk")]
 #[sk(
     name = "sk",
-    value_prefix = "comm",
+    value = "comm",
 )]
 pub struct ComplaintComments {
 
     #[pk]
     pub complaint_id: u32,
 
-    #[sk(order = 1)]
     pub comment_id: u32,
 
-    #[sk(order = 0)]
     pub comment_date: String,
 
     #[pk(order = 2)]
-    #[sk(order = 2)]
-    #[nk(name = "dde", order = 0)]
-    #[nk(name = "dd", order = 0)]
     pub comment_dates: String,
 
+    pub attribute2: String,
 }
 
 
