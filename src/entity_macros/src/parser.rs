@@ -56,6 +56,7 @@ struct RawSkStructDef {
     name: String,
     value_prefix: Option<String>,
     value_suffix: Option<String>,
+    value: Option<String>,
 }
 
 struct NkDef {
@@ -144,6 +145,7 @@ fn parse_entity_attrs(
                     name,
                     value_prefix: value_prefix.clone(),
                     value_suffix: value_suffix.clone(),
+                    value: static_value.clone(),
                 });
             }
 
@@ -368,20 +370,19 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
     let partition_key_def_tokens = quote! {
             entity_core::KeyDef {
                 attribute_name: #pk_attr_name.to_string(),
-                attribute_value: entity_core::AttributeValue::Composite(
-                    entity_core::CompositeAttributeValue {
-                        segments: #pk_segments,
-                        prefix: #pk_vp,
-                        suffix: #pk_vs,
-                    },
-                ),
+                attribute_value: entity_core::CompositeAttributeValue {
+                    segments: #pk_segments,
+                    prefix: #pk_vp,
+                    suffix: #pk_vs,
+                },
             }
     };
 
     // --- SK tokens (optional) ---
     let sort_key_def_tokens = if let Some(sk_def) = &schema.sort_key_def {
         let sk_name = sk_def.attribute_name.clone();
-        tok_key_def(&sk_name, &sk_def.attribute_value)
+        let key_def = tok_key_def(&sk_name, &sk_def.attribute_value);
+        quote! { Some(#key_def) }
     } else {
         quote! { None }
     };
@@ -390,13 +391,7 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
     let nk_items = {
         let items = schema.non_key_defs.iter().map(|nk| {
             let name = &nk.attribute_name;
-            let kind = tok_key_def(name, &nk.attribute_value);
-            quote! {
-                entity_core::NonKey {
-                    attribute_name: #name.to_string(),
-                    kind: #kind,
-                }
-            }
+            tok_key_def(name, &nk.attribute_value)
         });
         quote! { vec![ #( #items ),* ] }
     };
@@ -441,14 +436,6 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
                 let segs = segments.iter().map(|seg| {
                     let field =
                         syn::Ident::new(&seg.struct_field_name, proc_macro2::Span::call_site());
-                    let vp = prefix.clone();
-                    let vs = suffix.clone();
-                    let vp_expr = schema
-                        .partition_key_def
-                        .attribute_value
-                        .prefix
-                        .as_ref()
-                        .map(|p| quote! { parts.push(#p.to_string()); });
 
                     let vs_expr = schema
                         .partition_key_def
@@ -458,18 +445,18 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
                         .map(|s| quote! { parts.push(#s.to_string()); });
                     if let Some(pfx) = &seg.prefix {
                         quote! {
-                            let mut parts = vec![];
-                            #vp_expr
-                            #vs_expr
-                            parts.join("#")
-
                             format!("{}#{}", #pfx, self.#field)
                         }
                     } else {
                         quote! { self.#field.to_string() }
                     }
                 });
-                quote! { Some(vec![ #( #segs ),* ].join("#")) }
+                quote! {
+                    {
+                        let parts: ::std::vec::Vec<::std::string::String> = vec![ #( #segs ),* ];
+                        Some(parts.join("#"))
+                    }
+                }
             }
         }
     } else {
@@ -512,22 +499,20 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
             fn get_schema() -> entity_core::SchemaV2 {
                 let partition_key_def = #partition_key_def_tokens;
                 let sort_key_def = #sort_key_def_tokens;
+                let non_key_defs: Vec<entity_core::KeyDef<entity_core::AttributeValue>> = #nk_items;
 
                 entity_core::SchemaV2 {
                     partition_key_def,
                     sort_key_def,
-                    non_key_defs: #nk_items,
+                    non_key_defs,
                 }
             }
 
             fn to_item(&self) -> serde_json::Value {
                 let mut map = serde_json::Map::new();
 
-                // PK
-                let pk_val = #pk_expr;
-                map.insert("pk".to_string(), serde_json::Value::String(pk_val));
+                map.insert("pk".to_string(), serde_json::Value::String(#pk_expr));
 
-                // SK
                 if let Some(sk_val) = #sk_expr {
                     map.insert("sk".to_string(), serde_json::Value::String(sk_val));
                 }
@@ -540,6 +525,24 @@ fn generate_impl(input: &DeriveInput, schema: SchemaV2) -> TokenStream {
         }
     }
 }
+
+// fn to_item(&self) -> serde_json::Value {
+//     let mut map = serde_json::Map::new();
+//
+//     // PK
+//     let pk_val = #pk_expr;
+//     map.insert("pk".to_string(), serde_json::Value::String(pk_val));
+//
+//     // SK
+//     if let Some(sk_val) = #sk_expr {
+//         map.insert("sk".to_string(), serde_json::Value::String(sk_val));
+//     }
+//
+//     // NKs
+//     #( #nk_inserts )*
+//
+//         serde_json::Value::Object(map)
+// }
 
 fn build_ir(
     pk_def: RawPkStructDef,
@@ -704,18 +707,18 @@ fn validate_schema(schema: &SchemaV2) -> Result<(), syn::Error> {
     }
 
     // validate sk
-    if let Some(sk) = &schema.sort_key_def {
-        if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
-            &sk.attribute_value
-        {
-            if segments.is_empty() {
-                return Err(Error::new(
-                    proc_macro2::Span::call_site(),
-                    "SK must have segments or static valueee",
-                ));
-            }
-        }
-    }
+    // if let Some(sk) = &schema.sort_key_def {
+    //     if let AttributeValue::Composite(CompositeAttributeValue { segments, .. }) =
+    //         &sk.attribute_value
+    //     {
+    //         if segments.is_empty() {
+    //             return Err(Error::new(
+    //                 proc_macro2::Span::call_site(),
+    //                 "SK must have segments or static valueee",
+    //             ));
+    //         }
+    //     }
+    // }
 
     // validate NKs
     for nk in &schema.non_key_defs {

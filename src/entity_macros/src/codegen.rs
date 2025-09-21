@@ -13,10 +13,10 @@ pub fn tok_key_def(attribute_name: &str, attribute_value: &AttributeValue) -> To
     match attribute_value {
         AttributeValue::Static(static_name) => {
             quote! {
-                Some(entity_core::KeyDef {
+                entity_core::KeyDef {
                     attribute_name: #attribute_name.to_string(),
                     attribute_value: entity_core::AttributeValue::Static(#static_name.to_string()),
-                })
+                }
             }
         }
         AttributeValue::Composite(composite_attribute_value) => {
@@ -24,14 +24,14 @@ pub fn tok_key_def(attribute_name: &str, attribute_value: &AttributeValue) -> To
             let sk_vs = tok_optional_string(&composite_attribute_value.suffix);
             let sk_segments = tok_segments(&composite_attribute_value.segments);
             quote! {
-                Some(entity_core::KeyDef {
+                entity_core::KeyDef {
                     attribute_name: #attribute_name.to_string(),
                     attribute_value: entity_core::AttributeValue::Composite(entity_core::CompositeAttributeValue {
                         segments: #sk_segments,
                         prefix: #sk_vp,
                         suffix: #sk_vs,
                     }),
-                })
+                }
             }
         }
     }

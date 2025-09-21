@@ -1,3 +1,4 @@
+use std::alloc;
 use aws_sdk_dynamodb::{Client, Error};
 use entity_macros::{Entity, EntityModel, based_on};
 use serde::Serialize;
