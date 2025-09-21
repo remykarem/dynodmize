@@ -1,8 +1,9 @@
 use entity_core::{CompositeKey, KeySegment, NonKey, NonKeyKind, NonKeySegment, Schema};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use syn::parse::Parser;
+use syn::punctuated::Punctuated;
 use syn::{Attribute, Data, DeriveInput, Error, Lit, Meta};
 
 pub const DELIMITER: char = '#';
@@ -161,88 +162,120 @@ fn parse_fields(input: &DeriveInput) -> Result<Vec<FieldInfo>, syn::Error> {
 
     // Every struct has several fields
     for field in &data_struct.fields {
+        // -----------
+        // Field-level
+        // -----------
+
         let ident = field.ident.as_ref().unwrap();
-        let mut pk = None;
-        let mut sk = None;
+        let mut pks = vec![];
+        let mut sks = vec![];
         let mut nks = vec![];
 
-        // Every field has several attributes
+        // Every field can have several attributes
         for attr in &field.attrs {
-            if attr.path().is_ident("pk")
+            // ---------------
+            // Attribute-level
+            // ---------------
+
+            // Guard
+            if !(attr.path().is_ident("pk")
                 || attr.path().is_ident("sk")
-                || attr.path().is_ident("nk")
+                || attr.path().is_ident("nk"))
             {
-                match &attr.meta {
-                    // #[pk(... = ...)]
-                    Meta::List(list) => {
-                        let mut prefix = None;
-                        let mut order: Option<usize> = None;
-                        let mut name: Option<String> = None;
+                continue;
+            }
 
-                        let parsed =
-                            syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated
-                                .parse2(list.tokens.clone())?;
+            // An attribute will have one or more of these attribute fields
+            let mut prefix = None;
+            let mut order: Option<usize> = None;
+            let mut name: Option<String> = None;
 
-                        for nested in parsed {
-                            if let Meta::NameValue(nv) = nested {
-                                let key = nv.path.get_ident().unwrap().to_string();
-                                if let syn::Expr::Lit(expr_lit) = &nv.value {
-                                    match (&key[..], &expr_lit.lit) {
-                                        ("prefix", Lit::Str(s)) => prefix = Some(s.value()),
-                                        ("order", Lit::Int(i)) => order = Some(i.base10_parse()?),
-                                        ("name", Lit::Str(s)) => name = Some(s.value()),
-                                        _ => {
-                                            return Err(Error::new_spanned(
-                                                nv,
-                                                "Unknown field-level attribute",
-                                            ));
-                                        }
+            match &attr.meta {
+                // #[pk(... = ...)]
+                Meta::List(list) => {
+                    let parsed = Punctuated::<Meta, syn::Token![,]>::parse_terminated
+                        .parse2(list.tokens.clone())?;
+
+                    for nested in parsed {
+                        if let Meta::NameValue(nv) = nested {
+                            let key = nv.path.get_ident().unwrap().to_string();
+                            if let syn::Expr::Lit(expr_lit) = &nv.value {
+                                match (&key[..], &expr_lit.lit) {
+                                    ("prefix", Lit::Str(s)) => prefix = Some(s.value()),
+                                    ("order", Lit::Int(i)) => order = Some(i.base10_parse()?),
+                                    ("name", Lit::Str(s)) => name = Some(s.value()),
+                                    _ => {
+                                        return Err(Error::new_spanned(
+                                            nv,
+                                            "Unknown field-level attribute",
+                                        ));
                                     }
                                 }
                             }
                         }
-
-                        let order =
-                            order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
-
-                        if attr.path().is_ident("pk") {
-                            pk = Some((prefix.clone(), Some(order)));
-                        }
-
-                        if attr.path().is_ident("sk") {
-                            sk = Some((prefix.clone(), Some(order)));
-                        }
-
-                        if attr.path().is_ident("nk") {
-                            let name = name.ok_or_else(|| {
-                                Error::new_spanned(attr, "nk field must have name")
-                            })?;
-                            nks.push((name, prefix, Some(order)));
-                        }
                     }
-                    // #[pk]
-                    Meta::Path(path) => {
-                        if attr.path().is_ident("pk") {
-                            pk = Some((None, None));
-                        }
 
-                        if attr.path().is_ident("sk") {
-                            sk = Some((None, None));
-                        }
+                    let order = order.ok_or_else(|| Error::new_spanned(attr, "Missing order"))?;
 
-                        if attr.path().is_ident("nk") {
-                            nks.push((ident.to_string(), None, None));
-                        }
+                    if attr.path().is_ident("pk") {
+                        pks.push((prefix.clone(), Some(order)));
                     }
-                    _ => {}
+
+                    if attr.path().is_ident("sk") {
+                        sks.push((prefix.clone(), Some(order)));
+                    }
+
+                    if attr.path().is_ident("nk") {
+                        let name = name
+                            .ok_or_else(|| Error::new_spanned(attr, "nk field must have name"))?;
+                        nks.push((name, prefix, Some(order)));
+                    }
                 }
+                // #[pk]
+                Meta::Path(path) => {
+                    if attr.path().is_ident("pk") {
+                        pks.push((None, None));
+                    }
+
+                    if attr.path().is_ident("sk") {
+                        sks.push((None, None));
+                    }
+
+                    if attr.path().is_ident("nk") {
+                        nks.push((ident.to_string(), None, None));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Validate all the attributes for this field
+        if pks.len() > 1 {
+            return Err(Error::new_spanned(
+                field,
+                "Cannot have more than 1 pk per field",
+            ));
+        }
+        if sks.len() > 1 {
+            return Err(Error::new_spanned(
+                field,
+                "Cannot have more than 1 sk per field",
+            ));
+        }
+        if !nks.is_empty() {
+            let unique_nk_names: HashSet<&str> = nks.iter().map(|nk| nk.0.as_str()).collect();
+            if unique_nk_names.len() < nks.len() {
+                return Err(Error::new_spanned(
+                    field,
+                    "Cannot assign to the same nk per field",
+                ));
             }
         }
 
         out.push(FieldInfo {
             field_name: ident.to_string(),
-            pk,
-            sk,
+            pk: pks.pop(),
+            sk: sks.pop(),
             nks,
         });
     }
@@ -438,8 +471,16 @@ fn generate_impl(input: &DeriveInput, schema: Schema) -> TokenStream {
             let vp = sk.value_prefix.clone();
             let vs = sk.value_suffix.clone();
             let val = static_value.clone();
-            let vp_expr = schema.partition_key.value_prefix.as_ref().map(|p| quote! { parts.push(#p.to_string()); });
-            let vs_expr = schema.partition_key.value_suffix.as_ref().map(|s| quote! { parts.push(#s.to_string()); });
+            let vp_expr = schema
+                .partition_key
+                .value_prefix
+                .as_ref()
+                .map(|p| quote! { parts.push(#p.to_string()); });
+            let vs_expr = schema
+                .partition_key
+                .value_suffix
+                .as_ref()
+                .map(|s| quote! { parts.push(#s.to_string()); });
             quote! {
                 {
                     let mut parts = vec![];

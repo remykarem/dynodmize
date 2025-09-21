@@ -19,6 +19,12 @@ pub struct ComplaintComments {
     #[sk(order = 0)]
     pub comment_date: String,
 
+    #[pk(order = 2)]
+    #[sk(order = 2)]
+    #[nk(name = "dde", order = 0)]
+    #[nk(name = "dd", order = 0)]
+    pub comment_dates: String,
+
 }
 
 
