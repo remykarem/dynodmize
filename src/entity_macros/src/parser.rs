@@ -69,7 +69,6 @@ pub struct NkDef {
 }
 
 pub struct RawStructFieldDefs {
-    pub(crate) field_name: String,
     pub(crate) raw_field_def: RawFieldDef,
 }
 
@@ -346,19 +345,16 @@ fn parse_struct_fields(input: &DeriveInput) -> Result<Vec<RawStructFieldDefs>, s
 
         for pk_def in pk_defs {
             all_field_defs.push(RawStructFieldDefs {
-                field_name: ident.to_string(),
                 raw_field_def: RawFieldDef::Pk(pk_def),
             });
         }
         for sk_def in sk_defs {
             all_field_defs.push(RawStructFieldDefs {
-                field_name: ident.to_string(),
                 raw_field_def: RawFieldDef::Sk(sk_def),
             });
         }
         for nk_def in nk_defs {
             all_field_defs.push(RawStructFieldDefs {
-                field_name: ident.to_string(),
                 raw_field_def: RawFieldDef::Nk(nk_def),
             });
         }

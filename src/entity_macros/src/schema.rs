@@ -179,12 +179,12 @@ pub fn build_schema(
     let sort_key_def = if let Some(sk_def) = sk_struct_def {
         let mut sk_segments: Vec<(Option<usize>, Segment)> = vec![];
         for field_info in &field_defs {
-            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, .. }) = &field_info.raw_field_def
+            if let RawFieldDef::Sk(RawSkFieldDef { prefix, order, name, .. }) = &field_info.raw_field_def
             {
                 sk_segments.push((
                     *order,
                     Segment {
-                        struct_field_name: field_info.field_name.clone(),
+                        struct_field_name: name.clone(),
                         prefix: prefix.clone(),
                     },
                 ));
@@ -289,7 +289,7 @@ pub fn build_schema(
             match &mut entry.attribute_value {
                 AttributeValue::Static(_) => {
                     return Err(Error::new_spanned(
-                        &field_info.field_name,
+                        &name,
                         format!(
                             "NK {} is defined as static at struct level and cannot have field segments",
                             name
@@ -298,7 +298,7 @@ pub fn build_schema(
                 }
                 AttributeValue::Composite(CompositeAttributeValue { segments, .. }) => {
                     segments.push(Segment {
-                        struct_field_name: field_info.field_name.clone(),
+                        struct_field_name: name.clone(),
                         prefix: prefix.clone(),
                     });
                 }
