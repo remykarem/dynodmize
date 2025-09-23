@@ -27,11 +27,11 @@ Define
 #[derive(Dynodmize)]
 struct UserItem {
 
-	#[pk]
-	username: String,
+  	#[pk]
+  	username: String,
 	
-	#[sk]
-	item_id: u32
+	  #[sk]
+	  item_id: u32
 }
 ```
 
