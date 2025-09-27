@@ -14,6 +14,8 @@ over a struct.
 
 Aims to make single-table design less painful 😭
 
+Couldn't have done this without our good friend
+
 ## Examples
 
 Examples based
